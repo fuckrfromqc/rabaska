@@ -1,0 +1,30 @@
+[package]
+name = "rabaska-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+x25519-dalek = { version = "2.0", default-features = false, features = ["static_secrets", "zeroize", "precomputed-tables"] }
+chacha20poly1305 = "0.10"
+hkdf = "0.12"
+sha2 = "0.10"
+zeroize = "=1.7.0"
+rand_core = { version = "0.6", features = ["getrandom"] }
+raptorq = "=2.0.0"
+crc32fast = "=1.4.0"
+miniz_oxide = "=0.7.4"
+qrcodegen = "=1.8.0"
+rqrr = { version = "=0.6.0", default-features = false, optional = true }
+wasm-bindgen = { version = "=0.2.92", optional = true }
+js-sys = { version = "=0.3.69", optional = true }
+getrandom = { version = "=0.2.15", features = ["js"], optional = true }
+cfg-if = "=1.0.0"
+zeroize_derive = "=1.4.2"
+
+[features]
+default = ["qr-decode"]
+qr-decode = ["dep:rqrr"]
+wasm = ["dep:wasm-bindgen", "dep:js-sys", "dep:getrandom"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]

@@ -1,0 +1,119 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+
+      - name: fmt
+        run: cargo fmt --all -- --check
+
+      - name: clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: test
+        run: cargo test --release --all
+
+      # The optical loop: frames are rendered to pixels, degraded with blur,
+      # contrast loss and noise, then decoded back. Not a substitute for a
+      # camera, but it catches every codec regression without one.
+      - name: test wasm boundary and optical loop
+        run: cargo test --release -p rabaska-core --features wasm
+
+      - name: protocol modes
+        run: cargo run --release -p rabaska-harness -- modes
+
+      # The alarm that matters. Any change to a domain-separation string, a
+      # frame layout, or a KDF input produces a diff here. A diff is not a
+      # test failure to be fixed by regenerating the file: it means every
+      # already-paired device in the world will fail to derive the same key.
+      # Bump VERSION or revert.
+      - name: protocol vectors unchanged
+        run: |
+          cargo run --release -p rabaska-harness -- vectors > /tmp/v1.json
+          if ! diff -u vectors/v2.json /tmp/v1.json; then
+            echo "::error::Protocol vectors changed. This is a BREAKING change."
+            echo "::error::Bump wire::VERSION and the rabaska/vN domain strings, or revert."
+            exit 1
+          fi
+
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+
+      # Pure Rust all the way down: no build script invokes a C compiler, so
+      # this job needs only the wasm32 target. That is why compression is
+      # miniz_oxide and not zstd.
+      - name: build core for wasm
+        run: cargo build --release -p rabaska-core --features wasm --target wasm32-unknown-unknown
+
+      - name: install wasm-pack
+        run: curl -sSf https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
+
+      - name: full app build
+        run: ./build.sh
+
+      # The stock wasm-pack loader fetches its module, and connect-src 'none'
+      # blocks fetch. build.sh inlines the wasm instead; if a fetch ever creeps
+      # back into the app, the page will not boot and this catches it here
+      # rather than in someone's hand.
+      # wasm-bindgen getters are JS properties and everything else is a method;
+      # using the wrong form fails only at runtime, and a bug of exactly this
+      # family (use-after-move across the same boundary) crashed first launch.
+      - name: js/wasm boundary contract
+        run: python3 tools/check-boundary.py
+
+      # No DOM XSS sinks: the shell writes text with textContent only. A sink
+      # appearing later is how a decoded frame's bytes could become markup.
+      - name: no dom xss sinks
+        run: |
+          if grep -nE "innerHTML|outerHTML|insertAdjacentHTML|document\.write|\beval\(" app/app.js app/sw.js; then
+            echo "::error::DOM sink found in shell code"; exit 1
+          fi
+
+      - name: app never calls fetch
+        run: |
+          if grep -n "fetch(" dist/app.js | grep -v "^\s*//"; then
+            echo "::error::app.js calls fetch, which connect-src 'none' blocks"
+            exit 1
+          fi
+
+      # The CSP is the product claim. If connect-src ever stops being 'none',
+      # the app has gained the ability to transmit and the pitch is false.
+      - name: csp is airtight
+        run: |
+          grep -q "connect-src 'none'" app/_headers || { echo "::error::connect-src is not 'none'"; exit 1; }
+          grep -q "default-src 'none'" app/_headers || { echo "::error::default-src is not 'none'"; exit 1; }
+          python3 - <<'EOF'
+          import re, sys
+          sw = open('app/sw.js').read()
+          # skipWaiting inside the install handler is a silent-update channel and
+          # the whole point of a hand-written worker is that it has none. It is
+          # legitimate only in the message handler, behind an explicit user action.
+          # Strip comments first: a comment saying "deliberately NOT
+          # skipWaiting()" must not trip a check looking for skipWaiting().
+          code = re.sub(r"//[^\n]*", "", sw)
+          install = re.search(r"addEventListener\('install'.*?\n\}\);", code, re.S)
+          if install and 'skipWaiting' in install.group(0):
+              sys.exit('service worker skips waiting on install: silent update channel')
+          if 'rabaska:activate-update' not in code:
+              sys.exit('service worker has no explicit update path')
+          print('service worker update policy: parked, explicit activation only')
+          EOF

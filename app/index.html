@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>rabaska.favreau.xyz</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#FFFFFF">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<header class="site">
+  <div class="inner">
+    <div class="brand">rabaska<span>.favreau.xyz</span></div>
+    <div class="spacer"></div>
+    <span class="buildchip"><span class="dot"></span>offline</span>
+  </div>
+</header>
+
+<main>
+  <p class="eyebrow">Optical transfer</p>
+  <p class="tag">Nothing here touches the network. Turn on airplane mode and try it.</p>
+
+  <canvas id="display" aria-label="optical frame"></canvas>
+  <video id="camera" playsinline muted hidden></video>
+
+  <p id="hint">Starting…</p>
+
+  <div class="bar-wrap"><div id="bar"></div></div>
+  <p id="count"></p>
+
+  <section id="sas-panel" hidden>
+    <h2>Compare on both screens</h2>
+    <p id="sas"></p>
+    <p class="warn">If the digits differ, stop. Do not retry.</p>
+    <button id="sas-confirm" hidden>They match, send it</button>
+  </section>
+
+  <div class="actions">
+    <button id="paste">Paste text or a key</button>
+    <label class="btn" for="file">Choose a file</label>
+    <input id="file" type="file" hidden>
+    <a id="download" class="btn" hidden>Save received file</a>
+  </div>
+
+  <p id="brightness-hint" class="note" hidden>Turn screen brightness up.</p>
+  <p id="scan-to-send" class="note" hidden>Now point this device at the other code.</p>
+  <p id="storage-warning" hidden>
+    Storage is not durable here. Pairings may be forgotten after a week.
+    Add to Home Screen to keep them.
+  </p>
+
+  <section id="update-panel" hidden>
+    <p>A new build is available. It is downloaded but not running.</p>
+    <button id="update-now">Review and activate</button>
+  </section>
+
+  <footer class="site">
+    <span>this build <b id="own-build">…</b></span>
+    <span>peer <b id="peer-build">—</b></span>
+    <span>symbol <b id="symbol-size">—</b></span>
+    <span>protocol <b>v2</b></span>
+  </footer>
+</main>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

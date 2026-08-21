@@ -1,0 +1,3 @@
+[workspace]
+members = ["core", "harness"]
+resolver = "2"

@@ -1,0 +1,36 @@
+# Cloudflare Pages headers. The CSP is the product claim made browser-enforced:
+# with connect-src 'none' this page is structurally incapable of transmitting,
+# and anyone can verify that by reading the response headers instead of
+# trusting a privacy policy.
+#
+# default-src 'none' matters as much as connect-src: a remote image load with
+# data in the query string is a perfectly good exfiltration channel, and most
+# CSPs leave img-src wide open.
+#
+# font-src 'self' exists because the house fonts (Inter, JetBrains Mono) are
+# self-hosted; the sibling sites load them from Google, which this CSP forbids.
+#
+# connect-src 'none' is also why build.sh inlines the wasm as base64: the stock
+# wasm-pack loader fetches its module, and fetch is blocked here. The header is
+# not negotiable, so the loader changed instead.
+#
+# Permissions-Policy: microphone is OFF. The decode-rate audio feedback is
+# output-only (AudioContext), which needs no permission. The Phase 2
+# data-over-sound reverse channel will need microphone=(self) restored.
+#
+# Cross-Origin-Embedder-Policy is deliberately absent: it was here for
+# SharedArrayBuffer, which this build does not use, and require-corp only adds
+# ways for the page to fail. Phase 2's decode worker will need it back.
+/*
+  Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; font-src 'self'; connect-src 'none'; manifest-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Resource-Policy: same-origin
+  Referrer-Policy: no-referrer
+  X-Content-Type-Options: nosniff
+  Permissions-Policy: camera=(self), microphone=(), geolocation=(), payment=(), usb=(), bluetooth=(), serial=(), midi=(), interest-cohort=()
+
+# The service worker must never be served stale, or deployed updates are
+# invisible until the HTTP cache expires.
+/sw.js
+  Cache-Control: no-cache

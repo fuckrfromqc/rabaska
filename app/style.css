@@ -1,0 +1,191 @@
+/* rabaska.favreau.xyz — favreau-v1 house style.
+   Tokens are canon from dsa.favreau.xyz and positioning.favreau.xyz source:
+   accent #1D4ED8, ink #111827, hairline #E6E8EB, radius 5px, white canvas
+   with #F7F8FA insets. #9CA3AF never carries body text (2.54:1).
+   Fonts are self-hosted: the CSP forbids every external origin, Google Fonts
+   included, so Inter and JetBrains Mono ship with the app and precache. */
+
+@font-face {
+  font-family: 'Inter';
+  src: url('./inter-var.woff2') format('woff2');
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('./jbmono-400.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('./jbmono-500.woff2') format('woff2');
+  font-weight: 500;
+  font-display: swap;
+}
+
+:root {
+  --white: #FFFFFF;
+  --paper: #F7F8FA;
+  --line: #E6E8EB;
+  --line-strong: #D8DBDF;
+  --ink: #111827;
+  --muted: #6B7280;
+  --blue: #1D4ED8;
+  --blue-wash: #EFF4FF;
+  --blue-line: #C7D7FE;
+  --ok: #0B7A55;
+  --warn-ink: #8A6612;
+  --warn-bg: #FFFBEB;
+  --warn-line: #F1E3BE;
+  --err: #B3261E;
+  --err-bg: #FFF7F7;
+  --err-line: #F5C6C8;
+  --dot-ok: #34D399;
+  --sans: 'Inter', -apple-system, system-ui, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--white);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.6;
+  padding: 0 16px env(safe-area-inset-bottom);
+}
+:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 5px; }
+[hidden] { display: none !important; }
+.mono { font-family: var(--mono); }
+
+/* header: family brand pattern */
+header.site {
+  height: 52px;
+  margin: 0 -16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--white);
+}
+/* Align the brand with the content column rather than the viewport edge, so at
+   desktop widths it labels the thing beneath it instead of floating away. */
+header.site > .inner {
+  max-width: 30rem; height: 100%;
+  margin: 0 auto; padding: 0 16px;
+  display: flex; align-items: center; gap: 12px;
+}
+.brand {
+  font-family: var(--mono);
+  font-size: 13px; font-weight: 500; letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.brand span { color: var(--muted); font-weight: 400; }
+.spacer { flex: 1; }
+.buildchip {
+  font-family: var(--mono); font-size: 11px; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 5px;
+  padding: 4px 9px; background: var(--paper);
+  display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
+}
+.buildchip .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--dot-ok); flex: none;
+}
+
+main { max-width: 30rem; margin: 0 auto; padding: 22px 0 56px; }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 10.5px; font-weight: 500;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+.tag { color: var(--muted); font-size: 13px; margin: 2px 0 18px; }
+
+/* the optical surface is the hero: a plain white instrument, hairline-framed */
+#display {
+  width: 100%; aspect-ratio: 1;
+  background: var(--white);
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  display: block;
+  image-rendering: pixelated; /* smoothing a QR is how decode rate is lost */
+}
+
+#hint { min-height: 2.7em; color: var(--muted); font-size: 13.5px; margin: 12px 0 6px; }
+#hint.danger { color: var(--err); }
+
+.bar-wrap {
+  height: 6px; background: var(--paper);
+  border: 1px solid var(--line); border-radius: 5px; overflow: hidden;
+}
+#bar { height: 100%; width: 0; background: var(--blue); transition: width 0.12s linear; }
+#count {
+  font-family: var(--mono); font-size: 11px; color: var(--muted);
+  margin: 6px 0 16px; min-height: 1.2em;
+}
+
+/* the SAS is the ritual at the centre of the product: machine-made digits,
+   set in mono, on the only blue surface in the app */
+#sas-panel {
+  border: 1px solid var(--blue-line);
+  background: var(--blue-wash);
+  border-radius: 5px;
+  padding: 14px 16px 16px;
+  margin: 0 0 16px;
+}
+#sas-panel h2 {
+  font-family: var(--mono);
+  font-size: 10.5px; font-weight: 500;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--blue);
+  margin: 0 0 8px;
+}
+#sas {
+  font-family: var(--mono); font-weight: 500;
+  font-size: 2.5rem; letter-spacing: 0.22em;
+  color: var(--ink);
+  margin: 0 0 6px;
+}
+#sas-panel .warn { color: var(--err); font-size: 12.5px; margin: 0 0 10px; }
+
+.actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0; }
+button, .btn {
+  appearance: none;
+  font-family: var(--sans); font-size: 13px; font-weight: 500;
+  min-height: 44px; padding: 10px 16px;
+  border: 1px solid var(--line-strong); border-radius: 5px;
+  background: var(--white); color: var(--ink);
+  cursor: pointer; text-decoration: none;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+button:hover, .btn:hover { background: var(--paper); }
+#sas-confirm, #download {
+  border-color: var(--blue); background: var(--blue); color: #fff;
+}
+#sas-confirm:hover, #download:hover { background: #1A44BF; }
+
+.note { color: var(--muted); font-size: 12.5px; margin: 6px 0; }
+#storage-warning {
+  color: var(--warn-ink); background: var(--warn-bg);
+  border: 1px solid var(--warn-line); border-radius: 5px;
+  padding: 9px 12px; font-size: 12.5px;
+}
+#update-panel {
+  border: 1px solid var(--line); border-radius: 5px;
+  background: var(--paper); padding: 12px 14px; margin: 16px 0;
+}
+#update-panel p { margin: 0 0 10px; font-size: 13px; color: var(--ink); }
+
+footer.site {
+  margin-top: 34px; padding: 12px 0 18px;
+  border-top: 1px solid var(--line);
+  display: flex; gap: 16px; flex-wrap: wrap;
+  font-family: var(--mono); font-size: 10.5px; color: var(--muted);
+}
+footer.site b { color: var(--ink); font-weight: 500; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}

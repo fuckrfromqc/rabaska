@@ -1,0 +1,60 @@
+name: deploy
+
+# Deploys only from main, and only after ci.yml has passed on the same commit.
+# The protocol-vector job in ci.yml is the gate that matters: it fails on any
+# change to a domain-separation string or frame layout, which would break every
+# already-paired device in the field.
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  deploy:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+
+      - name: install wasm-pack
+        run: curl -sSf https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
+
+      - name: build
+        run: ./build.sh
+
+      # Reproducibility: the build hash is shown on both screens during a
+      # transfer and published here, so anyone can rebuild from source and
+      # confirm the deployed bundle is the code in this repo. That is a
+      # separate trust root from DNS and the CDN.
+      - name: publish build hash
+        run: |
+          H=$(grep -o "const BUILD = '[0-9a-f]*'" dist/app.js | grep -o "[0-9a-f]\{16\}")
+          echo "### Rabaska build \`$H\`" >> $GITHUB_STEP_SUMMARY
+          echo "Rebuild with \`./build.sh\` and compare." >> $GITHUB_STEP_SUMMARY
+
+      # Idempotent: succeeds the first time, fails harmlessly ever after. This
+      # is what removes the need to ever run wrangler on the laptop.
+      - name: ensure pages project exists
+        uses: cloudflare/wrangler-action@v3
+        continue-on-error: true
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages project create rabaska --production-branch=main
+
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name=rabaska --branch=main
