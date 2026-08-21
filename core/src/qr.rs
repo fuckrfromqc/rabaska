@@ -91,8 +91,10 @@ pub fn smallest_version(len: usize, ecc: Ecc) -> Option<u8> {
 /// `scale` is transmitter pixels per module. `quiet` is the quiet zone in
 /// modules; the spec says 4 and anything less costs real decode rate.
 pub fn encode_luma(data: &[u8], ecc: Ecc, scale: usize, quiet: usize) -> Result<Rendered> {
-    let code = QrCode::encode_binary(data, ecc.to_qrcodegen())
-        .map_err(|_| Error::Truncated { expected: 0, got: data.len() })?;
+    let code = QrCode::encode_binary(data, ecc.to_qrcodegen()).map_err(|_| Error::Truncated {
+        expected: 0,
+        got: data.len(),
+    })?;
     let modules = code.size() as usize;
     let side = (modules + 2 * quiet) * scale;
     let mut luma = vec![255u8; side * side];
@@ -113,7 +115,12 @@ pub fn encode_luma(data: &[u8], ecc: Ecc, scale: usize, quiet: usize) -> Result<
         }
     }
 
-    Ok(Rendered { luma, width: side, height: side, modules })
+    Ok(Rendered {
+        luma,
+        width: side,
+        height: side,
+        modules,
+    })
 }
 
 /// Decode the first QR found in a luma buffer, as raw bytes.
@@ -121,9 +128,8 @@ pub fn encode_luma(data: &[u8], ecc: Ecc, scale: usize, quiet: usize) -> Result<
 /// Never returns a `String`. See the module docs.
 #[cfg(feature = "qr-decode")]
 pub fn decode_luma(luma: &[u8], width: usize, height: usize) -> Result<Vec<u8>> {
-    let mut img = rqrr::PreparedImage::prepare_from_greyscale(width, height, |x, y| {
-        luma[y * width + x]
-    });
+    let mut img =
+        rqrr::PreparedImage::prepare_from_greyscale(width, height, |x, y| luma[y * width + x]);
     let grids = img.detect_grids();
     for grid in grids {
         let mut out: Vec<u8> = Vec::new();
@@ -220,8 +226,14 @@ mod tests {
         // PAIR_REQ grew from 53 to 69 bytes when the SAS commitment landed, so
         // its target moved from v6-H to v8-H: 49 modules a side instead of 41.
         // Still comfortably acquirable across a room.
-        assert!(capacity(8, Ecc::High) >= wire::PAIR_REQ_LEN, "PAIR_REQ needs v8-H");
-        assert!(capacity(10, Ecc::High) >= wire::BEACON_LEN, "BEACON needs v10-H");
+        assert!(
+            capacity(8, Ecc::High) >= wire::PAIR_REQ_LEN,
+            "PAIR_REQ needs v8-H"
+        );
+        assert!(
+            capacity(10, Ecc::High) >= wire::BEACON_LEN,
+            "BEACON needs v10-H"
+        );
         assert_eq!(smallest_version(wire::PAIR_REQ_LEN, Ecc::High), Some(8));
         assert_eq!(smallest_version(wire::REVEAL_LEN, Ecc::High), Some(4));
         assert_eq!(smallest_version(wire::BEACON_LEN, Ecc::High), Some(10));
@@ -242,7 +254,11 @@ mod tests {
             nonce: [0x5A; 24],
             plaintext_len: 4096,
             oti: [0x66; 12],
-            codec: CodecParams { symbol_size: 512, palette: 4, tile_px: 8 },
+            codec: CodecParams {
+                symbol_size: 512,
+                palette: 4,
+                tile_px: 8,
+            },
             build_hash: [0x77; 8],
         };
         let bytes = beacon.encode();
@@ -360,7 +376,10 @@ mod tests {
         // Phase 0 guessed 512 and it is a poor fit for the QR rung.
         assert_eq!(SymbolFrame::packets_per_frame(v25m, 516), 1);
         let wasted = usable_payload(25, Ecc::Medium) - 516;
-        assert!(wasted > 400, "the problem being solved: {wasted} bytes idle");
+        assert!(
+            wasted > 400,
+            "the problem being solved: {wasted} bytes idle"
+        );
 
         // Plan against every rung the ladder will use, not just the QR ones.
         let s = plan_symbol_size(&SHIPPING_RUNGS, 200, 1400);

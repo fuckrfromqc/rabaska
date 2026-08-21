@@ -96,7 +96,8 @@ impl SessionKey {
 fn hkdf32(ikm: &[u8], salt: &[u8], info: &[u8]) -> SessionKey {
     let hk = Hkdf::<Sha256>::new(Some(salt), ikm);
     let mut out = [0u8; 32];
-    hk.expand(info, &mut out).expect("32 is a valid HKDF length");
+    hk.expand(info, &mut out)
+        .expect("32 is a valid HKDF length");
     SessionKey(out)
 }
 
@@ -156,8 +157,18 @@ pub fn derive_session(
     ikm.extend_from_slice(&dh3);
 
     let (r_eph, s_eph, r_id, s_id) = match role {
-        Role::Sender => (*peer_eph_pub, own_eph.public(), *peer_id_pub, own_id.public()),
-        Role::Receiver => (own_eph.public(), *peer_eph_pub, own_id.public(), *peer_id_pub),
+        Role::Sender => (
+            *peer_eph_pub,
+            own_eph.public(),
+            *peer_id_pub,
+            own_id.public(),
+        ),
+        Role::Receiver => (
+            own_eph.public(),
+            *peer_eph_pub,
+            own_id.public(),
+            *peer_id_pub,
+        ),
     };
     let mut salt = Vec::with_capacity(8 + 128);
     salt.extend_from_slice(session_id);
@@ -175,11 +186,7 @@ pub fn derive_session(
 ///
 /// `s_id` supplies HPKE auth mode when present; the receiver must already hold
 /// the matching public key.
-pub fn seal_sender(
-    s_eph: &KeyPair,
-    s_id: Option<&KeyPair>,
-    r_id_pub: &[u8; 32],
-) -> SessionKey {
+pub fn seal_sender(s_eph: &KeyPair, s_id: Option<&KeyPair>, r_id_pub: &[u8; 32]) -> SessionKey {
     let mut salt = Vec::with_capacity(64);
     salt.extend_from_slice(&s_eph.public());
     salt.extend_from_slice(r_id_pub);
@@ -346,8 +353,14 @@ pub fn random_session_id() -> [u8; 8] {
 
 pub fn encrypt(key: &SessionKey, nonce: &[u8; 24], aad: &[u8], plaintext: &[u8]) -> Vec<u8> {
     let c = XChaCha20Poly1305::new(key.as_bytes().into());
-    c.encrypt(XNonce::from_slice(nonce), Payload { msg: plaintext, aad })
-        .expect("XChaCha20-Poly1305 encryption is infallible for in-memory buffers")
+    c.encrypt(
+        XNonce::from_slice(nonce),
+        Payload {
+            msg: plaintext,
+            aad,
+        },
+    )
+    .expect("XChaCha20-Poly1305 encryption is infallible for in-memory buffers")
 }
 
 pub fn decrypt(key: &SessionKey, nonce: &[u8; 24], aad: &[u8], ct: &[u8]) -> Result<Vec<u8>> {
@@ -375,7 +388,14 @@ pub fn derive_for_mode(
         Mode::Session => {
             let own_id = own_id.ok_or(Error::MissingIdentity)?;
             let peer_id = peer.id_pub.ok_or(Error::MissingIdentity)?;
-            Ok(derive_session(role, own_eph, own_id, &peer.eph_pub, peer_id, session_id))
+            Ok(derive_session(
+                role,
+                own_eph,
+                own_id,
+                &peer.eph_pub,
+                peer_id,
+                session_id,
+            ))
         }
         Mode::Seal => match role {
             Role::Sender => {

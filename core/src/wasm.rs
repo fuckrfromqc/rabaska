@@ -40,7 +40,9 @@ pub struct Identity {
 impl Identity {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Identity {
-        Identity { inner: KeyPair::generate() }
+        Identity {
+            inner: KeyPair::generate(),
+        }
     }
 
     /// Restore from a previously exported secret. See the module warning.
@@ -48,7 +50,9 @@ impl Identity {
         let b: [u8; 32] = bytes
             .try_into()
             .map_err(|_| JsError::new("identity secret must be 32 bytes"))?;
-        Ok(Identity { inner: KeyPair::from_bytes(b) })
+        Ok(Identity {
+            inner: KeyPair::from_bytes(b),
+        })
     }
 
     #[wasm_bindgen(getter)]
@@ -156,7 +160,12 @@ impl Session {
     /// attacker is asking you to.
     pub fn sas(&self, s_eph_pub: &[u8]) -> Result<String, JsError> {
         let s: [u8; 32] = s_eph_pub.try_into().map_err(|_| bad_key())?;
-        Ok(crypto::sas(&self.session_id, &self.eph.public(), &s, &self.r_nonce))
+        Ok(crypto::sas(
+            &self.session_id,
+            &self.eph.public(),
+            &s,
+            &self.r_nonce,
+        ))
     }
 }
 
@@ -223,7 +232,12 @@ pub struct Receive {
 impl Receive {
     #[wasm_bindgen(constructor)]
     pub fn new(session: Session) -> Receive {
-        Receive { rx: Receiver::new(), session, peer_identity: None, keyed: false }
+        Receive {
+            rx: Receiver::new(),
+            session,
+            peer_identity: None,
+            keyed: false,
+        }
     }
 
     /// Supply a stored sender identity so a beacon in SESSION mode can be keyed
@@ -310,9 +324,11 @@ impl Receive {
         // In SEAL mode the receiver's long-term identity does the key agreement,
         // because there is no reverse channel for an ephemeral to travel on.
         let own = match b.mode {
-            Mode::Seal => self.session.identity.as_ref().ok_or(
-                "SEAL beacon needs a device identity, which this session has none of",
-            )?,
+            Mode::Seal => self
+                .session
+                .identity
+                .as_ref()
+                .ok_or("SEAL beacon needs a device identity, which this session has none of")?,
             _ => &self.session.eph,
         };
         let key = crypto::derive_for_mode(
@@ -361,7 +377,9 @@ impl Receive {
 
     #[wasm_bindgen(getter)]
     pub fn mode(&self) -> Option<String> {
-        self.rx.beacon().map(|b| format!("{:?}", b.mode).to_lowercase())
+        self.rx
+            .beacon()
+            .map(|b| format!("{:?}", b.mode).to_lowercase())
     }
 }
 
@@ -411,7 +429,10 @@ impl Send {
             (Some(_), Some(_)) => Mode::Session,
             _ => Mode::Pair,
         };
-        let peer = crypto::Peer { eph_pub: req.r_eph_pub, id_pub: peer_id.as_ref() };
+        let peer = crypto::Peer {
+            eph_pub: req.r_eph_pub,
+            id_pub: peer_id.as_ref(),
+        };
         let key = crypto::derive_for_mode(
             mode,
             Role::Sender,
@@ -424,7 +445,14 @@ impl Send {
 
         let mut tx = Transmitter::new(
             &key,
-            cfg(mode, req.session_id, eph.public(), build_hash, frame_capacity, id.is_some()),
+            cfg(
+                mode,
+                req.session_id,
+                eph.public(),
+                build_hash,
+                frame_capacity,
+                id.is_some(),
+            ),
             payload,
         );
 
@@ -445,7 +473,11 @@ impl Send {
             _ => None,
         };
 
-        Ok(Send { tx, sas: None, pending })
+        Ok(Send {
+            tx,
+            sas: None,
+            pending,
+        })
     }
 
     /// One-pass send to a known receiver identity. No PAIR_REQ, no round trip,
@@ -467,7 +499,14 @@ impl Send {
         Ok(Send {
             tx: Transmitter::new(
                 &key,
-                cfg(Mode::Seal, sid, eph.public(), build_hash, frame_capacity, id.is_some()),
+                cfg(
+                    Mode::Seal,
+                    sid,
+                    eph.public(),
+                    build_hash,
+                    frame_capacity,
+                    id.is_some(),
+                ),
                 payload,
             ),
             sas: None,
@@ -482,8 +521,14 @@ impl Send {
     /// caller drives the interleaved density ladder by varying it per frame.
     pub fn next_frame(&mut self, capacity: usize) -> FrameOut {
         match self.tx.next_frame_at(capacity) {
-            Frame::Beacon(b) => FrameOut { robust: true, bytes: b },
-            Frame::Symbol(b) => FrameOut { robust: false, bytes: b },
+            Frame::Beacon(b) => FrameOut {
+                robust: true,
+                bytes: b,
+            },
+            Frame::Symbol(b) => FrameOut {
+                robust: false,
+                bytes: b,
+            },
         }
     }
 
@@ -597,9 +642,13 @@ pub fn render_qr(data: &[u8], ecc: u8, scale: usize) -> Result<QrOut, JsError> {
         2 => crate::qr::Ecc::Quartile,
         _ => crate::qr::Ecc::High,
     };
-    let r = crate::qr::encode_luma(data, e, scale, 4)
-        .map_err(|err| JsError::new(&err.to_string()))?;
-    Ok(QrOut { luma: r.luma, width: r.width, height: r.height })
+    let r =
+        crate::qr::encode_luma(data, e, scale, 4).map_err(|err| JsError::new(&err.to_string()))?;
+    Ok(QrOut {
+        luma: r.luma,
+        width: r.width,
+        height: r.height,
+    })
 }
 
 #[wasm_bindgen]
@@ -766,7 +815,9 @@ mod tests {
         // plus the checksum group.
         assert_eq!(groups.len(), 14, "got {t}");
         assert_eq!(groups.last().unwrap().len(), 4);
-        assert!(t.chars().all(|c| c == '-' || c.is_ascii_uppercase() || c.is_ascii_digit()));
+        assert!(t
+            .chars()
+            .all(|c| c == '-' || c.is_ascii_uppercase() || c.is_ascii_digit()));
     }
 
     #[test]
@@ -785,7 +836,10 @@ mod tests {
         let bh = build_hash(b"bundle-v1");
 
         let mut send = ok(Send::reply(&req, payload, None, None, &bh, 2953));
-        assert!(send.held(), "PAIR mode must withhold payload until confirmed");
+        assert!(
+            send.held(),
+            "PAIR mode must withhold payload until confirmed"
+        );
         assert!(send.sas().is_none(), "no SAS before the reveal");
 
         let mut recv = Receive::new(session);
@@ -800,7 +854,10 @@ mod tests {
         // Sender scans the reveal, checks the commitment, and only now can it
         // compute the digits.
         let sender_sas_val = ok(send.accept_reveal(session_ref));
-        assert_eq!(sender_sas_val, receiver_sas, "SAS must match on both screens");
+        assert_eq!(
+            sender_sas_val, receiver_sas,
+            "SAS must match on both screens"
+        );
         ok(send.release());
 
         let mut sender_sas: Option<String> = None;

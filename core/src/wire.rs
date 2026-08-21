@@ -80,7 +80,11 @@ impl Default for CodecParams {
         // 4.6% total idle bytes, and three packets in a v25-M QR frame where
         // the Phase 0 guess of 512 managed one. Do not change this casually:
         // it is carried in the beacon and both ends must agree.
-        CodecParams { symbol_size: 321, palette: 0, tile_px: 8 }
+        CodecParams {
+            symbol_size: 321,
+            palette: 0,
+            tile_px: 8,
+        }
     }
 }
 
@@ -105,10 +109,16 @@ fn seal_crc(buf: &mut Vec<u8>) {
 fn open_frame(bytes: &[u8], want_type: u8, want_len: Option<usize>) -> Result<&[u8]> {
     if let Some(n) = want_len {
         if bytes.len() != n {
-            return Err(Error::Truncated { expected: n, got: bytes.len() });
+            return Err(Error::Truncated {
+                expected: n,
+                got: bytes.len(),
+            });
         }
     } else if bytes.len() < 8 {
-        return Err(Error::Truncated { expected: 8, got: bytes.len() });
+        return Err(Error::Truncated {
+            expected: 8,
+            got: bytes.len(),
+        });
     }
     if bytes[0..2] != MAGIC {
         return Err(Error::BadMagic);
@@ -293,7 +303,10 @@ impl SymbolFrame {
 
     pub fn decode(bytes: &[u8]) -> Result<SymbolFrame> {
         if bytes.len() < SYMBOL_OVERHEAD {
-            return Err(Error::Truncated { expected: SYMBOL_OVERHEAD, got: bytes.len() });
+            return Err(Error::Truncated {
+                expected: SYMBOL_OVERHEAD,
+                got: bytes.len(),
+            });
         }
         let body = open_frame(bytes, frame_type::SYMBOL, None)?;
         let sid4: [u8; 4] = body[0..4].try_into().unwrap();
@@ -311,7 +324,12 @@ impl SymbolFrame {
             .chunks_exact(packet_len)
             .map(|c| c.to_vec())
             .collect();
-        Ok(SymbolFrame { sid4, frame_id, packet_len: packet_len as u16, packets })
+        Ok(SymbolFrame {
+            sid4,
+            frame_id,
+            packet_len: packet_len as u16,
+            packets,
+        })
     }
 
     /// Bytes a video frame must carry for `count` packets of `packet_len`.
@@ -403,7 +421,10 @@ impl Reveal {
 /// route a freshly decoded frame before it knows what it is.
 pub fn peek_type(bytes: &[u8]) -> Result<u8> {
     if bytes.len() < 4 {
-        return Err(Error::Truncated { expected: 4, got: bytes.len() });
+        return Err(Error::Truncated {
+            expected: 4,
+            got: bytes.len(),
+        });
     }
     if bytes[0..2] != MAGIC {
         return Err(Error::BadMagic);
@@ -428,7 +449,10 @@ mod tests {
             r_commit: [4; 16],
         };
         assert_eq!(pr.encode().len(), PAIR_REQ_LEN);
-        let rv = Reveal { sid4: [1; 4], r_nonce: [9; 16] };
+        let rv = Reveal {
+            sid4: [1; 4],
+            r_nonce: [9; 16],
+        };
         assert_eq!(rv.encode().len(), REVEAL_LEN);
 
         let bc = Beacon {
@@ -444,7 +468,11 @@ mod tests {
         };
         assert_eq!(bc.encode().len(), BEACON_LEN);
 
-        let cp = Complete { sid4: [1; 4], status: Status::Ok, hash8: [7; 8] };
+        let cp = Complete {
+            sid4: [1; 4],
+            status: Status::Ok,
+            hash8: [7; 8],
+        };
         assert_eq!(cp.encode().len(), COMPLETE_LEN);
     }
 
@@ -458,7 +486,10 @@ mod tests {
             r_commit: [6; 16],
         };
         assert_eq!(PairReq::decode(&pr.encode()).unwrap(), pr);
-        let rv = Reveal { sid4: [3; 4], r_nonce: [2; 16] };
+        let rv = Reveal {
+            sid4: [3; 4],
+            r_nonce: [2; 16],
+        };
         assert_eq!(Reveal::decode(&rv.encode()).unwrap(), rv);
 
         let bc = Beacon {
@@ -469,7 +500,11 @@ mod tests {
             nonce: [7; 24],
             plaintext_len: 123456,
             oti: [6; 12],
-            codec: CodecParams { symbol_size: 900, palette: 4, tile_px: 8 },
+            codec: CodecParams {
+                symbol_size: 900,
+                palette: 4,
+                tile_px: 8,
+            },
             build_hash: [5; 8],
         };
         assert_eq!(Beacon::decode(&bc.encode()).unwrap(), bc);
@@ -482,7 +517,11 @@ mod tests {
         };
         assert_eq!(SymbolFrame::decode(&sf.encode()).unwrap(), sf);
 
-        let cp = Complete { sid4: [1; 4], status: Status::HashMismatch, hash8: [7; 8] };
+        let cp = Complete {
+            sid4: [1; 4],
+            status: Status::HashMismatch,
+            hash8: [7; 8],
+        };
         assert_eq!(Complete::decode(&cp.encode()).unwrap(), cp);
     }
 
@@ -533,11 +572,18 @@ mod tests {
 
     #[test]
     fn wrong_type_rejected() {
-        let cp = Complete { sid4: [1; 4], status: Status::Ok, hash8: [7; 8] };
-        assert_eq!(PairReq::decode(&cp.encode()), Err(Error::Truncated {
-            expected: PAIR_REQ_LEN,
-            got: COMPLETE_LEN
-        }));
+        let cp = Complete {
+            sid4: [1; 4],
+            status: Status::Ok,
+            hash8: [7; 8],
+        };
+        assert_eq!(
+            PairReq::decode(&cp.encode()),
+            Err(Error::Truncated {
+                expected: PAIR_REQ_LEN,
+                got: COMPLETE_LEN
+            })
+        );
     }
 
     #[test]

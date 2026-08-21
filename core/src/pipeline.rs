@@ -58,21 +58,21 @@ const REPAIR_PER_BLOCK: u32 = 15;
 /// never show the user a setting.
 pub fn is_already_compressed(b: &[u8]) -> bool {
     const MAGICS: &[&[u8]] = &[
-        b"\xFF\xD8\xFF",         // JPEG
-        b"\x89PNG\r\n\x1a\n",    // PNG
+        b"\xFF\xD8\xFF",      // JPEG
+        b"\x89PNG\r\n\x1a\n", // PNG
         b"GIF87a",
         b"GIF89a",
-        b"PK\x03\x04",           // zip family: docx, xlsx, pptx, apk, jar, epub
-        b"\x1f\x8b",             // gzip
-        b"\x28\xB5\x2F\xFD",     // zstd
-        b"BZh",                  // bzip2
-        b"\xFD7zXZ\x00",         // xz
-        b"7z\xBC\xAF\x27\x1C",   // 7z
+        b"PK\x03\x04",         // zip family: docx, xlsx, pptx, apk, jar, epub
+        b"\x1f\x8b",           // gzip
+        b"\x28\xB5\x2F\xFD",   // zstd
+        b"BZh",                // bzip2
+        b"\xFD7zXZ\x00",       // xz
+        b"7z\xBC\xAF\x27\x1C", // 7z
         b"Rar!\x1a\x07",
-        b"%PDF",                 // usually already Flate-compressed internally
+        b"%PDF", // usually already Flate-compressed internally
         b"OggS",
         b"fLaC",
-        b"\x00\x00\x01\xBA",     // MPEG-PS
+        b"\x00\x00\x01\xBA", // MPEG-PS
     ];
     if MAGICS.iter().any(|m| b.starts_with(m)) {
         return true;
@@ -317,9 +317,14 @@ pub enum Ingest {
     /// `beacon().s_eph_pub` and call `set_key`, then re-feed nothing: buffered
     /// symbols are replayed automatically.
     BeaconAcquired,
-    Progress { received: usize, needed: usize },
+    Progress {
+        received: usize,
+        needed: usize,
+    },
     /// Reassembled, tag verified, decompressed, length checked.
-    Done { plaintext: Vec<u8> },
+    Done {
+        plaintext: Vec<u8>,
+    },
 }
 
 pub struct Receiver {
@@ -466,7 +471,10 @@ impl Receiver {
             }
             self.seen.push(raw.clone());
             self.received += 1;
-            let dec = self.decoder.as_mut().expect("decoder exists once beacon does");
+            let dec = self
+                .decoder
+                .as_mut()
+                .expect("decoder exists once beacon does");
             if finished.is_none() {
                 if let Some(ct) = dec.decode(EncodingPacket::deserialize(&raw)) {
                     finished = Some(ct);
@@ -475,14 +483,20 @@ impl Receiver {
         }
 
         let Some(ct) = finished else {
-            return Ok(Ingest::Progress { received: self.received, needed: self.needed });
+            return Ok(Ingest::Progress {
+                received: self.received,
+                needed: self.needed,
+            });
         };
 
         // RaptorQ says it reassembled something. Only the tag decides whether it
         // is the right something.
         let Some(key) = &self.key else {
             // Reassembled but cannot open yet. Caller has not supplied the key.
-            return Ok(Ingest::Progress { received: self.received, needed: self.needed });
+            return Ok(Ingest::Progress {
+                received: self.received,
+                needed: self.needed,
+            });
         };
         let b = self.beacon.as_ref().unwrap();
         let body = crypto::decrypt(key, &b.nonce, &b.aad(), &ct)?;
@@ -629,7 +643,12 @@ mod tests {
 
         // Session one: collect a few frames, then the phone locks.
         let mut rx1 = Receiver::new();
-        rx1.set_key(crypto::derive_pair(Role::Receiver, &r_eph, &s_eph.public(), &sid));
+        rx1.set_key(crypto::derive_pair(
+            Role::Receiver,
+            &r_eph,
+            &s_eph.public(),
+            &sid,
+        ));
         for _ in 0..4 {
             let f = tx.next_frame();
             let _ = rx1.ingest(f.bytes());
@@ -640,8 +659,12 @@ mod tests {
 
         // Session two: restore and carry on. No restart.
         let mut rx2 = Receiver::new();
-        let mut key =
-            Some(crypto::derive_pair(Role::Receiver, &r_eph, &s_eph.public(), &sid));
+        let mut key = Some(crypto::derive_pair(
+            Role::Receiver,
+            &r_eph,
+            &s_eph.public(),
+            &sid,
+        ));
         rx2.restore(saved);
         for _ in 0..5_000 {
             let f = tx.next_frame();
@@ -747,13 +770,20 @@ mod tests {
         assert!(done);
         let (received, needed) = rx.progress();
         assert_eq!(received, rx.distinct(), "counted a duplicate");
-        assert!(received <= pool, "counted {received} symbols from a pool of {pool}");
+        assert!(
+            received <= pool,
+            "counted {received} symbols from a pool of {pool}"
+        );
         // And it must not have overshot: a correct run stops just past `needed`.
         assert!(
             received < needed + 32,
             "received {received} for a {needed}-symbol object"
         );
-        assert_eq!(rx.checkpoint().len(), received, "checkpoint holds duplicates");
+        assert_eq!(
+            rx.checkpoint().len(),
+            received,
+            "checkpoint holds duplicates"
+        );
     }
 
     #[test]
@@ -791,7 +821,9 @@ mod tests {
         assert!(is_already_compressed(b"RIFF\x00\x00\x00\x00WEBPVP8 "));
         assert!(!is_already_compressed(b"RIFF\x00\x00\x00\x00WAVEfmt "));
         assert!(!is_already_compressed(b"[Interface]\nPrivateKey ="));
-        assert!(!is_already_compressed(b"-----BEGIN OPENSSH PRIVATE KEY-----"));
+        assert!(!is_already_compressed(
+            b"-----BEGIN OPENSSH PRIVATE KEY-----"
+        ));
     }
 
     #[test]
@@ -799,7 +831,10 @@ mod tests {
         let text = "PrivateKey = abc\nAllowedIPs = 0.0.0.0/0\n".repeat(200);
         let (z, did) = maybe_compress(text.as_bytes());
         assert!(did);
-        assert!(z.len() * 3 < text.len(), "expected better than 3x on config text");
+        assert!(
+            z.len() * 3 < text.len(),
+            "expected better than 3x on config text"
+        );
         assert_eq!(maybe_decompress(z, true).unwrap(), text.as_bytes());
     }
 

@@ -32,11 +32,23 @@ struct Rung {
 /// QR version 25 at ECC-M, capacity measured by `qr::capacity` rather than
 /// guessed. The interoperability rung: readable by hardware wallets and generic
 /// scanners, and the one that still works at a bad angle.
-const RUNG_QR: Rung = Rung { name: "QR v25", capacity: 997, weight: 1 };
+const RUNG_QR: Rung = Rung {
+    name: "QR v25",
+    capacity: 997,
+    weight: 1,
+};
 /// 1024x1024 grid of 8px tiles, 4 bits shape in luma, 1 bit colour in chroma.
-const RUNG_C4: Rung = Rung { name: "4-colour", capacity: 7500, weight: 2 };
+const RUNG_C4: Rung = Rung {
+    name: "4-colour",
+    capacity: 7500,
+    weight: 2,
+};
 /// Same grid, 3 bits of colour. Buys 17% and costs a lot of white-balance margin.
-const RUNG_C8: Rung = Rung { name: "8-colour", capacity: 11000, weight: 4 };
+const RUNG_C8: Rung = Rung {
+    name: "8-colour",
+    capacity: 11000,
+    weight: 4,
+};
 
 /// Per-rung decode probability. Chroma is half resolution in both axes under
 /// 4:2:0, so colour rungs degrade first and fastest as conditions worsen.
@@ -49,17 +61,40 @@ struct Lighting {
 }
 
 const CONDITIONS: &[Lighting] = &[
-    Lighting { name: "bench, tripod, max brightness", p_qr: 0.98, p_c4: 0.92, p_c8: 0.80 },
-    Lighting { name: "desk to phone, handheld",       p_qr: 0.94, p_c4: 0.80, p_c8: 0.55 },
-    Lighting { name: "phone to phone, handheld",      p_qr: 0.88, p_c4: 0.62, p_c8: 0.30 },
-    Lighting { name: "dim room, bad angle",           p_qr: 0.55, p_c4: 0.18, p_c8: 0.02 },
+    Lighting {
+        name: "bench, tripod, max brightness",
+        p_qr: 0.98,
+        p_c4: 0.92,
+        p_c8: 0.80,
+    },
+    Lighting {
+        name: "desk to phone, handheld",
+        p_qr: 0.94,
+        p_c4: 0.80,
+        p_c8: 0.55,
+    },
+    Lighting {
+        name: "phone to phone, handheld",
+        p_qr: 0.88,
+        p_c4: 0.62,
+        p_c8: 0.30,
+    },
+    Lighting {
+        name: "dim room, bad angle",
+        p_qr: 0.55,
+        p_c4: 0.18,
+        p_c8: 0.02,
+    },
 ];
 
 /// Deterministic PRNG so a failure reproduces exactly.
 struct Rng(u64);
 impl Rng {
     fn next_f64(&mut self) -> f64 {
-        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         ((self.0 >> 11) as f64) / ((1u64 << 53) as f64)
     }
 }
@@ -98,10 +133,20 @@ fn keys_for(mode: Mode, p: &Peers) -> (crypto::SessionKey, crypto::SessionKey) {
         ),
         Mode::Session => (
             crypto::derive_session(
-                Role::Sender, &p.s_eph, &p.s_id, &p.r_eph.public(), &p.r_id.public(), &p.sid,
+                Role::Sender,
+                &p.s_eph,
+                &p.s_id,
+                &p.r_eph.public(),
+                &p.r_id.public(),
+                &p.sid,
             ),
             crypto::derive_session(
-                Role::Receiver, &p.r_eph, &p.r_id, &p.s_eph.public(), &p.s_id.public(), &p.sid,
+                Role::Receiver,
+                &p.r_eph,
+                &p.r_id,
+                &p.s_eph.public(),
+                &p.s_id.public(),
+                &p.sid,
             ),
         ),
         Mode::Seal => (
@@ -130,7 +175,10 @@ fn run(
         mode,
         session_id: p.sid,
         s_eph_pub: p.s_eph.public(),
-        codec: CodecParams { palette: 8, ..CodecParams::default() },
+        codec: CodecParams {
+            palette: 8,
+            ..CodecParams::default()
+        },
         build_hash: crypto::build_hash(b"rabaska-harness"),
         frame_capacity: RUNG_C4.capacity,
         sender_auth: matches!(mode, Mode::Seal),
@@ -203,12 +251,34 @@ fn cmd_modes() {
     let payload: Vec<u8> = wireguard_config().into_bytes();
 
     for (mode, label, note) in [
-        (Mode::Pair, "PAIR", "first meeting, ephemeral ECDH + 5-digit SAS"),
-        (Mode::Session, "SESSION", "stored identities, triple-DH, scan and go"),
-        (Mode::Seal, "SEAL", "camera-less sender, one pass, zero round trips"),
-        (Mode::Open, "OPEN", "trusted room, no confidentiality, labelled"),
+        (
+            Mode::Pair,
+            "PAIR",
+            "first meeting, ephemeral ECDH + 5-digit SAS",
+        ),
+        (
+            Mode::Session,
+            "SESSION",
+            "stored identities, triple-DH, scan and go",
+        ),
+        (
+            Mode::Seal,
+            "SEAL",
+            "camera-less sender, one pass, zero round trips",
+        ),
+        (
+            Mode::Open,
+            "OPEN",
+            "trusted room, no confidentiality, labelled",
+        ),
     ] {
-        match run(mode, &payload, &[RUNG_QR, RUNG_C4, RUNG_C8], &light, 0xC0FFEE) {
+        match run(
+            mode,
+            &payload,
+            &[RUNG_QR, RUNG_C4, RUNG_C8],
+            &light,
+            0xC0FFEE,
+        ) {
             Ok((frames, secs)) => {
                 println!("  {label:<8} ok   {frames:>4} frames  {secs:>5.2}s   {note}")
             }
@@ -220,7 +290,12 @@ fn cmd_modes() {
     let p = Peers::new();
     println!(
         "\n  SAS on this pairing: {}  (both screens must match)",
-        crypto::sas(&p.sid, &p.r_eph.public(), &p.s_eph.public(), &crypto::random_nonce16())
+        crypto::sas(
+            &p.sid,
+            &p.r_eph.public(),
+            &p.s_eph.public(),
+            &crypto::random_nonce16()
+        )
     );
 }
 
@@ -240,7 +315,13 @@ fn cmd_ladder() {
     for light in CONDITIONS {
         for (label, payload) in &payloads {
             let wire_kb = wire_bytes(payload) as f64 / 1024.0;
-            match run(Mode::Session, payload, &[RUNG_QR, RUNG_C4, RUNG_C8], light, 0xBEEF) {
+            match run(
+                Mode::Session,
+                payload,
+                &[RUNG_QR, RUNG_C4, RUNG_C8],
+                light,
+                0xBEEF,
+            ) {
                 Ok((frames, secs)) => {
                     println!(
                         "  {:<26} {:<18} {:>7.1}K {:>8} {:>8.2} {:>6.1} KB/s",
@@ -283,9 +364,8 @@ fn cmd_ladder() {
 /// are pure fiction.
 fn realistic_payloads() -> Vec<(&'static str, Vec<u8>)> {
     let mut rng = Rng(0x5EED);
-    let mut rand_bytes = |n: usize| -> Vec<u8> {
-        (0..n).map(|_| (rng.next_f64() * 256.0) as u8).collect()
-    };
+    let mut rand_bytes =
+        |n: usize| -> Vec<u8> { (0..n).map(|_| (rng.next_f64() * 256.0) as u8).collect() };
     const B64: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     const B32: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
@@ -302,8 +382,9 @@ fn realistic_payloads() -> Vec<(&'static str, Vec<u8>)> {
     // JSON: keys and punctuation compress, the secrets do not.
     let mut totp = b"{\"version\":2,\"entries\":[".to_vec();
     for i in 0..300 {
-        let secret: Vec<u8> =
-            (0..32).map(|_| B32[rand_bytes(1)[0] as usize % 32]).collect();
+        let secret: Vec<u8> = (0..32)
+            .map(|_| B32[rand_bytes(1)[0] as usize % 32])
+            .collect();
         totp.extend_from_slice(
             format!(
                 "{}{{\"issuer\":\"service{i:03}\",\"account\":\"louis@example.com\",\
@@ -342,14 +423,19 @@ fn wire_bytes(payload: &[u8]) -> usize {
             mode: Mode::Pair,
             session_id: [0; 8],
             s_eph_pub: [0; 32],
-            codec: CodecParams { palette: 4, ..CodecParams::default() },
+            codec: CodecParams {
+                palette: 4,
+                ..CodecParams::default()
+            },
             build_hash: [0; 8],
             frame_capacity: RUNG_C4.capacity,
             sender_auth: false,
         },
         payload,
     );
-    let oti = rabaska_core::wire::Beacon::decode(&tx.beacon().encode()).unwrap().oti;
+    let oti = rabaska_core::wire::Beacon::decode(&tx.beacon().encode())
+        .unwrap()
+        .oti;
     // transfer_length is the first five bytes, big-endian.
     let mut n = 0u64;
     for b in &oti[0..5] {
@@ -399,10 +485,20 @@ fn cmd_vectors() {
     assert_eq!(k_pair.as_bytes(), k_pair_r.as_bytes(), "PAIR must agree");
 
     let k_sess = crypto::derive_session(
-        Role::Sender, &s_eph, &s_id, &r_eph.public(), &r_id.public(), &sid,
+        Role::Sender,
+        &s_eph,
+        &s_id,
+        &r_eph.public(),
+        &r_id.public(),
+        &sid,
     );
     let k_sess_r = crypto::derive_session(
-        Role::Receiver, &r_eph, &r_id, &s_eph.public(), &s_id.public(), &sid,
+        Role::Receiver,
+        &r_eph,
+        &r_id,
+        &s_eph.public(),
+        &s_id.public(),
+        &sid,
     );
     assert_eq!(k_sess.as_bytes(), k_sess_r.as_bytes(), "SESSION must agree");
 
@@ -411,9 +507,12 @@ fn cmd_vectors() {
     assert_eq!(k_seal.as_bytes(), k_seal_r.as_bytes(), "SEAL must agree");
 
     let k_seal_auth = crypto::seal_sender(&s_eph, Some(&s_id), &r_id.public());
-    let k_seal_auth_r =
-        crypto::seal_receiver(&r_id, &s_eph.public(), Some(&s_id.public()));
-    assert_eq!(k_seal_auth.as_bytes(), k_seal_auth_r.as_bytes(), "SEAL-AUTH must agree");
+    let k_seal_auth_r = crypto::seal_receiver(&r_id, &s_eph.public(), Some(&s_id.public()));
+    assert_eq!(
+        k_seal_auth.as_bytes(),
+        k_seal_auth_r.as_bytes(),
+        "SEAL-AUTH must agree"
+    );
 
     let beacon = Beacon {
         mode: Mode::Session,
@@ -423,7 +522,10 @@ fn cmd_vectors() {
         nonce,
         plaintext_len: 4096,
         oti: [0x66; 12],
-        codec: CodecParams { palette: 4, ..CodecParams::default() },
+        codec: CodecParams {
+            palette: 4,
+            ..CodecParams::default()
+        },
         build_hash: [0x77; 8],
     };
     let ct = crypto::encrypt(&k_sess, &nonce, &beacon.aad(), b"rabaska test payload");
@@ -467,10 +569,19 @@ fn cmd_vectors() {
     println!("    \"seal_auth\": \"{}\"", hex(k_seal_auth.as_bytes()));
     println!("  }},");
     println!("  \"human_values\": {{");
-    println!("    \"sas\":           \"{}\",", crypto::sas(&sid, &r_eph.public(), &s_eph.public(), &sas_nonce));
+    println!(
+        "    \"sas\":           \"{}\",",
+        crypto::sas(&sid, &r_eph.public(), &s_eph.public(), &sas_nonce)
+    );
     println!("    \"sas_nonce\":     \"{}\",", hex(&sas_nonce));
-    println!("    \"commit\":        \"{}\",", hex(&crypto::commit(&sid, &r_eph.public(), &sas_nonce)));
-    println!("    \"id_hint_r\":     \"{}\",", hex(&crypto::id_hint(&r_id.public())));
+    println!(
+        "    \"commit\":        \"{}\",",
+        hex(&crypto::commit(&sid, &r_eph.public(), &sas_nonce))
+    );
+    println!(
+        "    \"id_hint_r\":     \"{}\",",
+        hex(&crypto::id_hint(&r_id.public()))
+    );
     println!("    \"complete_hash\": \"{}\"", hex(&complete.hash8));
     println!("  }},");
     println!("  \"frames\": {{");
