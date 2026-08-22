@@ -70,7 +70,7 @@ pub fn capacity(version: u8, ecc: Ecc) -> usize {
     }
     let (mut lo, mut hi) = (0usize, 3000usize);
     while lo < hi {
-        let mid = (lo + hi + 1) / 2;
+        let mid = (lo + hi).div_ceil(2);
         if fits(mid, version, ecc) {
             lo = mid;
         } else {

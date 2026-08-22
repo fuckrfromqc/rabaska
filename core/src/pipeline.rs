@@ -36,9 +36,9 @@ use crate::{Error, Result};
 /// and a photo is skipped by the sniffer before compression is considered at
 /// all. Ratio only begins to matter at sizes past the ergonomic ceiling of
 /// holding two phones steady.
-
-/// Deflate level. 9 is maximum; the payloads are kilobytes, so the CPU cost is
-/// far below the file-picker latency the user is already paying.
+///
+/// Level 9 is maximum. The payloads are kilobytes, so the CPU cost sits far
+/// below the file-picker latency the user is already paying.
 pub const DEFLATE_LEVEL: u8 = 9;
 
 /// Below this, framing overhead swamps any ratio gain.
@@ -285,7 +285,12 @@ impl Transmitter {
         let id = self.frame_id;
         self.frame_id = self.frame_id.wrapping_add(1);
 
-        if self.held || id % self.beacon_interval == 0 {
+        // clippy suggests `id.is_multiple_of(..)`, stable only since Rust 1.87.
+        // Taking it would make 1.87 this crate's implicit MSRV to satisfy a
+        // style lint, which is a bad trade for a tool meant to build anywhere.
+        #[allow(clippy::manual_is_multiple_of)]
+        let beacon_due = id % self.beacon_interval == 0;
+        if self.held || beacon_due {
             return Frame::Beacon(self.beacon_bytes.clone());
         }
 
@@ -430,7 +435,7 @@ impl Receiver {
                 }
                 let oti = ObjectTransmissionInformation::deserialize(&b.oti);
                 let sym = oti.symbol_size().max(1) as u64;
-                self.needed = ((oti.transfer_length() + sym - 1) / sym) as usize;
+                self.needed = oti.transfer_length().div_ceil(sym) as usize;
                 self.decoder = Some(Decoder::new(oti));
                 self.beacon = Some(b);
                 Ok(Ingest::BeaconAcquired)
