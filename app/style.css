@@ -153,11 +153,15 @@ main { max-width: 30rem; margin: 0 auto; padding: 22px 0 56px; }
 
 .bench { display: flex; flex-direction: column; gap: 10px; }
 
+/* --w is the only control: the card's width, from which the height follows.
+   No percentage term in it, because it is reused in a height calc below and a
+   percentage there would resolve against the container's HEIGHT and quietly
+   mean something else entirely. max-width does that job instead. */
 .sight {
   --sight: var(--line-strong);            /* recoloured per state below */
-  --w: min(15rem, 100%, 30vh);            /* fallback where svh is unsupported */
-  --w: min(15rem, 100%, 30svh);
+  --w: min(15rem, 30vh);
   width: var(--w);
+  max-width: 100%;
   margin: 0 auto;
   border: 1px solid var(--line-strong);
   border-radius: 5px;
@@ -165,20 +169,39 @@ main { max-width: 30rem; margin: 0 auto; padding: 22px 0 56px; }
   background: var(--paper);
   transition: width 0.26s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
-.sight[data-size="glance"] {
-  --w: min(9.5rem, 100%, 19vh);
-  --w: min(9.5rem, 100%, 19svh);
+.sight[data-size="glance"] { --w: min(9.5rem, 19vh); }
+
+/* svh, because iOS reports vh as the address-bar-hidden height and would size
+   against space the page does not have.
+
+   This has to be an @supports gate and not two declarations of --w. Custom
+   properties are not validated when parsed, so a browser with no svh still
+   accepts and stores the svh line, overriding the vh one; the unit only fails
+   later, when var() is substituted into width, and an invalid width computes to
+   its initial value: auto. The card then took the full column and the preview
+   went full-bleed on exactly the devices the fallback was written for. Two
+   plain `width:` declarations would also be safe, since the parser drops the
+   unknown one, but the value is needed in a variable for the height below. */
+@supports (height: 1svh) {
+  .sight { --w: min(15rem, 30svh); }
+  .sight[data-size="glance"] { --w: min(9.5rem, 19svh); }
 }
 
-/* Width is the only control. The height follows from the ratio, so there is
-   exactly one number to reason about and the frame can never go off-ratio. */
+/* An explicit length, not aspect-ratio. The video below asks for height:100%,
+   and a percentage height only resolves against a definite parent height; a
+   height coming from aspect-ratio does not count everywhere, leaving the video
+   at height:auto, which for a portrait camera stream is around 1900px of
+   intrinsic height bursting out of a 135px card. */
 .sight-view {
   position: relative;
-  aspect-ratio: 16 / 9;
+  height: calc(var(--w) * 0.5625);
   background: var(--paper);
 }
 #camera {
   display: block; width: 100%; height: 100%;
+  /* Belt and braces. Whatever happens to the percentages above, a camera's
+     intrinsic size must never be what decides this element's box. */
+  max-width: 100%; max-height: 100%;
   /* contain, not cover. The frame is 16:9 because that is what the app asks
      for, but a device is free to hand back 4:3, and cover would then quietly
      crop away the edges of the very field of view this exists to show. */

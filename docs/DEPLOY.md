@@ -63,6 +63,20 @@ It cannot replace two phones. There is no blur, no rolling shutter, no
 autofocus and no hands, so it proves the protocol and the shell are correct and
 says nothing about whether the ladder is fast enough at arm's length.
 
+And the phone layout invariants, on both CSS branches:
+
+```bash
+node tools/layout.mjs
+```
+
+The card must never exceed its cap, the video must stay inside the card, and
+the page must never scroll sideways — checked at five viewports, twice each:
+once as-is, and once with `style.css` rewritten so `svh` is a unit the browser
+does not know. That second pass is the point. A `--w` fallback written as two
+custom-property declarations silently shipped a full-bleed camera preview to
+every browser without `svh`, and a headless Chromium screenshot looked perfect
+because Chromium takes the other branch.
+
 **Do not use `python3 -m http.server` for this.** It serves none of the headers
 in `_headers`, so the CSP that governs production is simply absent and the app
 you are looking at is not the app you deploy. That gap is not theoretical. Under
