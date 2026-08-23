@@ -13,10 +13,13 @@ import init, {
 } from './rabaska_core.js';
 import { WASM_BYTES } from './wasm-inline.js';
 
-// Stamped by build.sh over the wasm, the glue and this file. Displayed next to
+// Stamped by build.sh over every precached byte of the app. Displayed next to
 // the peer's during a transfer: two devices running different code is then
 // visible in one glance, which is the cheapest defence against an origin
 // serving different JavaScript to one side of a pairing.
+//
+// It is also the service worker's cache key, which is why it covers the assets
+// and not just the executable files. See build.sh.
 const BUILD = '__BUILD_HASH__';
 
 // ---------------------------------------------------------------------------
@@ -354,8 +357,39 @@ async function beReceiver() {
   };
   setHint(RESTING);
 
+  // Re-arming lives in one place because forgetting it anywhere is not a
+  // dropped frame, it is a receiver that never hears again.
+  //
+  // The .catch is the same concern generalised. onFrame is async and nothing
+  // awaits it, so any throw anywhere inside it becomes an unhandled rejection
+  // that skips the re-arm at the bottom and ends reception permanently, in
+  // silence. Catching it here costs one frame instead of the session.
+  const schedule = () => {
+    if (state.stop) return;
+    const run = () => onFrame().catch((e) => {
+      console.warn('rabaska: frame dropped:', e.message);
+      schedule();
+    });
+    if ('requestVideoFrameCallback' in video) video.requestVideoFrameCallback(run);
+    else requestAnimationFrame(run);
+  };
+
   const onFrame = async () => {
     if (state.stop) return;
+
+    // A camera reports zero dimensions more often than it looks: before
+    // metadata arrives, while the stream reconfigures, and on the way back from
+    // a backgrounded tab. getImageData then throws IndexSizeError, and because
+    // this callback is async and nothing awaits it the rejection is silent and
+    // the loop below never re-arms. The receiver goes deaf for the rest of the
+    // session while still displaying its code, which is indistinguishable from
+    // a receiver that is simply waiting. scanOneFrame has always guarded this;
+    // this loop did not.
+    if (!video.videoWidth || !video.videoHeight) {
+      schedule();
+      return;
+    }
+
     cv.width = video.videoWidth;
     cv.height = video.videoHeight;
     ctx.drawImage(video, 0, 0);
@@ -444,12 +478,10 @@ async function beReceiver() {
         : 'Receiving. Hold steady.');
     }
 
-    if ('requestVideoFrameCallback' in video) video.requestVideoFrameCallback(onFrame);
-    else requestAnimationFrame(onFrame);
+    schedule();
   };
 
-  if ('requestVideoFrameCallback' in video) video.requestVideoFrameCallback(onFrame);
-  else requestAnimationFrame(onFrame);
+  schedule();
 
   // Rateless coding means resume is free: lock the phone, walk away, come back,
   // keep collecting. There is never a restart.

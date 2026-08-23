@@ -40,11 +40,21 @@ async function device(name, port) {
     const fx = feed.getContext('2d');
     fx.fillStyle = '#909090';
     fx.fillRect(0, 0, 1024, 1024);
+    // Must be called continuously, including with null. A canvas captureStream
+    // emits a frame only when the canvas is drawn to, so a canvas painted once
+    // yields a MediaStream that never produces a frame: video.play() then never
+    // resolves and the app stalls at "Starting…" having done nothing wrong. A
+    // real camera is always producing frames; sometimes it is just pointed at
+    // a desk. null is the desk.
     window.__setFeed = (url) => new Promise((res) => {
-      const img = new Image();
-      img.onload = () => {
+      const desk = () => {
         fx.fillStyle = '#909090';
         fx.fillRect(0, 0, 1024, 1024);
+      };
+      if (!url) { desk(); return res(); }
+      const img = new Image();
+      img.onload = () => {
+        desk();
         fx.drawImage(img, (1024 - img.width) / 2, (1024 - img.height) / 2);
         res();
       };
@@ -81,14 +91,25 @@ const B = await device('B', B_PORT); // sender: stages a payload
 await A.waitForTimeout(2500);
 await B.waitForTimeout(500);
 
+// Both cameras run from the start; `aimed` only decides whether they are
+// pointed at each other or at a bare desk. A person picks the file first and
+// then lifts the phone, and with the channel already open B scans A's PAIR_REQ
+// and flips to sender so fast that "N bytes ready" is gone before it can be
+// observed — failing the test on a state the app passed through correctly.
 let bridging = true;
+let aimed = false;
 const bridge = (async () => {
   while (bridging) {
     try {
-      const fromA = await A.evaluate(() => document.getElementById('display').toDataURL());
-      await B.evaluate((u) => window.__setFeed(u), fromA);
-      const fromB = await B.evaluate(() => document.getElementById('display').toDataURL());
-      await A.evaluate((u) => window.__setFeed(u), fromB);
+      if (aimed) {
+        const fromA = await A.evaluate(() => document.getElementById('display').toDataURL());
+        await B.evaluate((u) => window.__setFeed(u), fromA);
+        const fromB = await B.evaluate(() => document.getElementById('display').toDataURL());
+        await A.evaluate((u) => window.__setFeed(u), fromB);
+      } else {
+        await A.evaluate(() => window.__setFeed(null));
+        await B.evaluate(() => window.__setFeed(null));
+      }
     } catch { /* a page mid-navigation is fine */ }
     await new Promise((r) => setTimeout(r, 60));
   }
@@ -100,6 +121,9 @@ const state = (p) => p.evaluate(() => ({
   sasVisible: !document.getElementById('sas-panel').hidden,
   confirmVisible: !document.getElementById('sas-confirm').hidden,
   count: document.getElementById('count').textContent,
+  // The viewfinder's own readout, which separates "saw nothing" from "decoded
+  // frames but the protocol did not advance" without any extra instrumentation.
+  word: document.getElementById('sight-word').textContent,
   peer: document.getElementById('peer-build').textContent,
   download: !document.getElementById('download').hidden,
 }));
@@ -126,6 +150,8 @@ let failed = false;
 try {
   await B.click('#paste');
   await waitFor(B, 'B', 'payload staged', (s) => s.hint.includes('bytes ready'), 5000);
+
+  aimed = true; // the two devices are now pointed at each other
   await waitFor(B, 'B', "scanned A's PAIR_REQ, flipped to sender",
     (s) => /Point this device|About/.test(s.hint), 30000);
 

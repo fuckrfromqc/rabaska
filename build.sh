@@ -59,10 +59,25 @@ cp "$GLUE" "$OUT/rabaska_core.js"
 cp app/index.html app/app.js app/style.css app/manifest.webmanifest app/_headers "$OUT/"
 cp app/icon-192.png app/icon-512.png app/*.woff2 "$OUT/"
 
-# Build hash over everything that executes. Displayed on both screens during a
-# transfer, so two devices running different code is visible at a glance. It
-# must therefore cover the glue and the app, not just the wasm.
-BUILD=$(cat "$WASM" "$GLUE" app/app.js app/index.html | shasum -a 256 | cut -c1-16)
+# Build hash over every precached byte, not merely everything that executes.
+#
+# Two jobs ride on this number and only one of them was being served. The
+# visible one: it is shown on both screens during a transfer, so two devices
+# running different code is a glance apart. The silent one: the service worker
+# names its cache `rabaska-$BUILD`, so the hash IS the cache key.
+#
+# It used to cover the wasm, the glue, app.js and index.html. A change to
+# style.css therefore produced an identical hash, an identical sw.js, and a
+# browser that correctly concluded there was nothing to update — leaving every
+# device that had already loaded the app serving the old stylesheet forever. A
+# stylesheet-only fix could not reach a single existing user, and nothing said
+# so. The list is explicit and ordered rather than globbed, because a glob makes
+# the hash depend on directory listing order.
+BUILD=$(cat "$WASM" "$GLUE" \
+  app/app.js app/sw.js app/index.html app/style.css \
+  app/manifest.webmanifest app/icon-192.png app/icon-512.png \
+  app/inter-var.woff2 app/jbmono-400.woff2 app/jbmono-500.woff2 \
+  | shasum -a 256 | cut -c1-16)
 echo "==> build hash: $BUILD"
 
 # The service worker is generated from a template so the precache list can never

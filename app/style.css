@@ -133,38 +133,56 @@ main { max-width: 30rem; margin: 0 auto; padding: 22px 0 56px; }
       cosmetic gain.
    3. It is in the layout from first paint, showing an empty slot until a stream
       attaches. Nothing is ever inserted or removed, so there is no reflow to
-      smooth over: the only thing that animates is one height, between two
-      named sizes, and both of them are lengths so the transition interpolates
-      rather than snapping.
+      smooth over: the only thing that animates is one width, between two named
+      sizes, and both are lengths so the transition interpolates rather than
+      snapping.
 
-   `align` is exactly 16:9, the sensor's own aspect ratio, so at that size
-   object-fit: cover crops nothing and the preview is pixel-for-pixel what the
-   decoder is handed. That is the size to trust when alignment is the problem.
-   `glance` is a strip: it crops, and it is for when alignment is not the
-   problem — a running transfer, or a camera that is off. */
+   Sizing is driven by viewport HEIGHT, which is the scarce axis. The first
+   version derived the height from the column width, so a taller phone with a
+   wider screen got a *bigger* preview while having no more room for it, and on
+   every iPhone the progress bar ended up below the fold. Height is what runs
+   out here; height is what the cap is written against.
+
+   The frame is a centred card rather than a full-width slab. Full width forces
+   a choice between a tall block that does not fit and a short one that crops
+   the sensor, and cropping is the wrong trade for the one job this has: the
+   whole field of view is what tells you the code is inside it. A narrower card
+   keeps 16:9 intact at a height that fits. `svh` and not `vh`, because iOS
+   reports `vh` as the address-bar-hidden height and would size against space
+   the page does not have. */
 
 .bench { display: flex; flex-direction: column; gap: 10px; }
 
 .sight {
   --sight: var(--line-strong);            /* recoloured per state below */
-  --view-h: calc(min(30rem, 100vw - 32px) * 0.5625);
-  margin: 0;
+  --w: min(15rem, 100%, 30vh);            /* fallback where svh is unsupported */
+  --w: min(15rem, 100%, 30svh);
+  width: var(--w);
+  margin: 0 auto;
   border: 1px solid var(--line-strong);
   border-radius: 5px;
   overflow: hidden;
   background: var(--paper);
+  transition: width 0.26s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
-.sight[data-size="glance"] { --view-h: 84px; }
+.sight[data-size="glance"] {
+  --w: min(9.5rem, 100%, 19vh);
+  --w: min(9.5rem, 100%, 19svh);
+}
 
+/* Width is the only control. The height follows from the ratio, so there is
+   exactly one number to reason about and the frame can never go off-ratio. */
 .sight-view {
   position: relative;
-  height: var(--view-h);
+  aspect-ratio: 16 / 9;
   background: var(--paper);
-  transition: height 0.26s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 #camera {
   display: block; width: 100%; height: 100%;
-  object-fit: cover;
+  /* contain, not cover. The frame is 16:9 because that is what the app asks
+     for, but a device is free to hand back 4:3, and cover would then quietly
+     crop away the edges of the very field of view this exists to show. */
+  object-fit: contain;
   /* The rear camera is not a mirror. Flipping it here would mean aiming by
      moving the phone the wrong way, which is worse than no preview at all. */
   background: var(--paper);
