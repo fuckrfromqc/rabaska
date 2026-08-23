@@ -745,13 +745,58 @@ async function main() {
 
   if ('serviceWorker' in navigator) {
     const reg = await navigator.serviceWorker.register('./sw.js');
-    // Parked update, never automatic. See sw.js.
+
+    // A parked build, offered and never taken automatically. See sw.js.
+    const offer = () => { $('update-panel').hidden = false; };
+
+    // Parked during an earlier visit and still waiting. A worker only waits
+    // when another one is already active, so its presence is itself the proof
+    // that this is an update rather than a first install.
+    if (reg.waiting) offer();
+
+    // `updatefound` fires for the very first install too, where there is no
+    // previous build and nothing to update from — which is why every
+    // first-time visitor was told a new build was available. A null controller
+    // is what separates the two cases: it means no worker is driving this page
+    // yet, so the one being installed is the first, not a replacement.
+    //
+    // And `installing` is not yet a build anyone can switch to. Waiting for
+    // 'installed' means the panel only offers something that has finished
+    // downloading and precaching.
     reg.addEventListener('updatefound', () => {
-      $('update-panel').hidden = false;
+      const fresh = reg.installing;
+      if (!fresh || !navigator.serviceWorker.controller) return;
+      const check = () => {
+        if (fresh.state === 'installed') offer();
+      };
+      check(); // in case it installed before this listener was attached
+      fresh.addEventListener('statechange', check);
     });
+
     $('update-now').onclick = () => {
-      reg.waiting?.postMessage('rabaska:activate-update');
-      location.reload();
+      const parked = reg.waiting;
+      if (!parked) {
+        // Nothing waiting: it already took over, or never finished arriving.
+        $('update-panel').hidden = true;
+        return;
+      }
+      // Subscribe BEFORE asking, and reload from the handover rather than from
+      // the line after postMessage. skipWaiting() resolves asynchronously, so
+      // an immediate reload races the new worker into control and often wins —
+      // serving the OLD build out of the old worker's cache, with the banner
+      // still up. That reads as an update that refuses to install, and for an
+      // app whose update policy is the security story, it is the wrong thing
+      // to get wrong.
+      //
+      // No timeout fallback on purpose: reloading on a timer is the same race
+      // with extra steps. If the handover never happens the banner stays,
+      // which is the honest outcome.
+      navigator.serviceWorker.addEventListener(
+        'controllerchange',
+        () => location.reload(),
+        { once: true },
+      );
+      parked.postMessage('rabaska:activate-update');
     };
     trackOfflineReadiness(reg); // deliberately not awaited: boot does not wait
   } else {
