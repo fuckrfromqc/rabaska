@@ -166,7 +166,16 @@ Watch for, in rough order of likelihood:
   flaky across iOS versions. If it happens, the fix is to run from Safari rather
   than the home screen icon until it is understood.
 - **Nothing decoding.** Screen brightness first, then distance. The v40 frames
-  need a fair number of camera pixels per module.
+  need a fair number of camera pixels per module. The viewfinder under the
+  display now says which of those is wrong: `searching` means the camera is on
+  and nothing is decoding, `too dark` means the luma probe found neither range
+  nor brightness, `locked` means frames are being read.
+- **A blank viewfinder while decoding still works.** The `<video>` is composited
+  by the browser, not painted by us, so this is a CSS or a CSP question, not a
+  camera one. Check the console for a `media-src` violation on the MediaStream:
+  `blob:` is already allowed, which covers the browsers that back `srcObject`
+  with a blob URL, but if a violation appears the fix is `mediastream:` in
+  `media-src` and nothing else. Do not relax `connect-src`.
 - **`scanOneFrame` failing to reopen the camera** after the receive loop stopped
   the tracks. This is the code path I am least confident in.
 - **Storage warning appearing**, meaning `navigator.storage.persist()` was

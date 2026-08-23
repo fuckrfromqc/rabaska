@@ -113,6 +113,142 @@ main { max-width: 30rem; margin: 0 auto; padding: 22px 0 56px; }
   image-rendering: pixelated; /* smoothing a QR is how decode rate is lost */
 }
 
+/* ---------------------------------------------------------------------------
+   the viewfinder
+   ---------------------------------------------------------------------------
+   Three rules shaped this.
+
+   1. It never overlaps #display. That canvas is the transmit antenna and the
+      far camera has to read every module of it, so a picture-in-picture inset
+      would be paid for in the other device's decode rate.
+   2. It costs nothing per frame. The <video> element is composited by the
+      browser at whatever size CSS says; the decode loop keeps drawing the same
+      stream into its own offscreen canvas at full sensor resolution. Painting
+      a second visible canvas would add a 2 MP copy to every frame for a
+      cosmetic gain.
+   3. It is in the layout from first paint, showing an empty slot until a stream
+      attaches. Nothing is ever inserted or removed, so there is no reflow to
+      smooth over: the only thing that animates is one height, between two
+      named sizes, and both of them are lengths so the transition interpolates
+      rather than snapping.
+
+   `align` is exactly 16:9, the sensor's own aspect ratio, so at that size
+   object-fit: cover crops nothing and the preview is pixel-for-pixel what the
+   decoder is handed. That is the size to trust when alignment is the problem.
+   `glance` is a strip: it crops, and it is for when alignment is not the
+   problem — a running transfer, or a camera that is off. */
+
+.bench { display: flex; flex-direction: column; gap: 10px; }
+
+.sight {
+  --sight: var(--line-strong);            /* recoloured per state below */
+  --view-h: calc(min(30rem, 100vw - 32px) * 0.5625);
+  margin: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--paper);
+}
+.sight[data-size="glance"] { --view-h: 84px; }
+
+.sight-view {
+  position: relative;
+  height: var(--view-h);
+  background: var(--paper);
+  transition: height 0.26s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+#camera {
+  display: block; width: 100%; height: 100%;
+  object-fit: cover;
+  /* The rear camera is not a mirror. Flipping it here would mean aiming by
+     moving the phone the wrong way, which is worse than no preview at all. */
+  background: var(--paper);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.sight.live #camera { opacity: 1; }
+
+/* Empty-slot label. No scrim behind it, because it only ever shows over bare
+   paper: the video that would otherwise sit underneath is faded out in exactly
+   the states that reveal this. */
+.sight-view::after {
+  content: 'camera off';
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: 11px; color: var(--muted);
+  opacity: 1; transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+.sight[data-tone="blocked"] .sight-view::after { content: 'camera blocked'; }
+.sight.live .sight-view::after { opacity: 0; }
+
+/* Four corner brackets on the centre of the frame. */
+.reticle {
+  position: absolute; inset: 12% 22%;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+.reticle i {
+  position: absolute; width: 15px; height: 15px;
+  border: 0 solid var(--sight);
+  /* The brackets sit on live video, which is any colour at all. A hairline of
+     shadow is what keeps them readable against a lit screen and a dark room
+     without giving them a second colour to mean something. */
+  filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.55));
+  transition: border-color 0.25s ease;
+}
+.reticle i:nth-child(1) { top: 0; left: 0; border-top-width: 2px; border-left-width: 2px; }
+.reticle i:nth-child(2) { top: 0; right: 0; border-top-width: 2px; border-right-width: 2px; }
+.reticle i:nth-child(3) { bottom: 0; left: 0; border-bottom-width: 2px; border-left-width: 2px; }
+.reticle i:nth-child(4) { bottom: 0; right: 0; border-bottom-width: 2px; border-right-width: 2px; }
+.sight[data-tone="off"] .reticle, .sight[data-tone="blocked"] .reticle { opacity: 0; }
+/* Hidden at glance size on purpose: that size crops, so brackets there would
+   claim a precision the cropped view does not have. */
+.sight[data-size="glance"] .reticle { opacity: 0; }
+
+/* Tap anywhere on the preview to resize it. A real button rather than a click
+   handler on the figure, so it has a name, a focus ring and keyboard access. */
+.sight-resize {
+  position: absolute; inset: 0;
+  min-height: 0; padding: 0;
+  border: 0; border-radius: 0; background: none;
+  font-size: 0; color: transparent;
+}
+.sight-resize:hover { background: none; }
+/* The frame clips its overflow, so the default outward focus ring would be cut
+   in half. Draw it inside the preview instead. */
+.sight-resize:focus-visible { outline-offset: -4px; border-radius: 0; }
+
+.sight figcaption {
+  display: flex; align-items: center; gap: 10px;
+  padding: 5px 10px;
+  border-top: 1px solid var(--line);
+  background: var(--white);
+}
+.sight-label {
+  font-family: var(--mono); font-size: 10px; font-weight: 500;
+  letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted);
+}
+.sight-chip {
+  font-family: var(--mono); font-size: 11px; color: var(--muted);
+  display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
+}
+.sight-chip .dot {
+  width: 6px; height: 6px; border-radius: 50%; flex: none;
+  background: var(--sight);
+  transition: background-color 0.25s ease;
+}
+.sight-chip b { font-weight: 500; color: var(--muted); }
+
+/* One variable carries the whole state: bracket colour, dot, and nothing else.
+   A viewfinder that changes four things at once reads as an alarm. */
+.sight[data-tone="lock"] { --sight: var(--blue); }
+.sight[data-tone="lock"] .sight-chip b { color: var(--blue); }
+.sight[data-tone="ok"] { --sight: var(--ok); }
+.sight[data-tone="ok"] .sight-chip b { color: var(--ok); }
+.sight[data-tone="warn"] { --sight: var(--warn-ink); }
+.sight[data-tone="warn"] .sight-chip b { color: var(--warn-ink); }
+
 #hint { min-height: 2.7em; color: var(--muted); font-size: 13.5px; margin: 12px 0 6px; }
 #hint.danger { color: var(--err); }
 

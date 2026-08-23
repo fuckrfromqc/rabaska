@@ -136,6 +136,148 @@ function paint(canvas, qr) {
 }
 
 // ---------------------------------------------------------------------------
+// the viewfinder
+// ---------------------------------------------------------------------------
+
+// Aiming used to be blind. The camera ran with no preview at all, and the first
+// confirmation that it was pointed at anything was a click, which does not
+// happen until a symbol has already landed. Everything before that — is the code
+// in frame, is it in focus, is the room too dark — the user had to infer from
+// silence.
+//
+// So: a live preview under the display, and one word that says what the decoder
+// is actually doing with those pixels. The word is the point. Video alone shows
+// you a QR code sitting in frame and tells you nothing about whether it decodes,
+// which is the only question being asked.
+//
+// The rule this module lives by: it is on the camera path, so it must cost
+// nothing. No second canvas, no extra pixel copy, and no DOM write on a frame
+// where nothing changed.
+
+const SIGHT_LOCK_MS = 700;     // decode gap still counted as a lock
+const SIGHT_SETTLE_MS = 1200;  // steady lock before the preview stands down
+// Both thresholds are guesses from the synthetic optical loop, not measurements
+// from a sensor, and no camera has run this code yet. They are deliberately
+// conservative: the cost of a threshold that is too shy is a word that never
+// appears, and the cost of one that is too eager is a receiver being told to
+// turn a light on in a room that is already lit.
+const DARK_SPREAD = 46;        // luma range below which QR decoding is hopeless
+const DARK_MEAN = 62;
+
+// Seeded from the markup rather than restated here. Two defaults that can
+// disagree is exactly how the first sightSize() call gets swallowed as a no-op
+// and the preview opens at the wrong size for the rest of the session.
+const sight = {
+  word: $('sight-word').textContent,
+  tone: $('sight').dataset.tone,
+  size: $('sight').dataset.size,
+  manual: false,
+  lastDecode: 0,
+  lockedSince: 0,
+};
+
+function sightSay(word, tone) {
+  if (word === sight.word && tone === sight.tone) return; // no DOM per frame
+  sight.word = word;
+  sight.tone = tone;
+  $('sight-word').textContent = word;
+  $('sight').dataset.tone = tone;
+}
+
+// Two sizes. `align` is exactly 16:9, the sensor's own ratio, so the preview is
+// pixel-for-pixel what the decoder is handed — that is the size to trust when
+// alignment is the problem. `glance` crops to a strip for when it is not.
+function sightSize(size, force = false) {
+  if (size === sight.size || (sight.manual && !force)) return;
+  sight.size = size;
+  $('sight').dataset.size = size;
+  $('sight-resize').textContent =
+    size === 'align' ? 'Shrink camera preview' : 'Enlarge camera preview';
+}
+
+// One camera, one preview, one owner. Both scan paths open their stream through
+// here, so there is exactly one thing on screen that knows whether the camera is
+// live, and it cannot disagree with the hardware.
+async function openCamera(constraints) {
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: constraints });
+  } catch (e) {
+    sightSay('blocked', 'warn');
+    throw e;
+  }
+  const video = $('camera');
+  video.srcObject = stream;
+  await video.play();
+
+  // Fade in when the element actually has a frame, not when play() resolves:
+  // play() returns before there is anything to show, and fading up an empty
+  // rectangle reads as a glitch rather than as a camera starting.
+  const live = () => $('sight').classList.add('live');
+  if (video.readyState >= 2) live();
+  else video.addEventListener('loadeddata', live, { once: true });
+
+  sight.lastDecode = 0;
+  sight.lockedSince = 0;
+  sightSay('searching', 'find');
+  sightSize('align');
+  return { stream, video };
+}
+
+function closeCamera(stream, word = 'off', tone = 'off') {
+  stream?.getTracks().forEach((t) => t.stop());
+  $('sight').classList.remove('live');
+  sight.lockedSince = 0;
+  sightSay(word, tone);
+  // A camera that is off has nothing to aim, so it does not get to hold a third
+  // of the screen. This is most of a sender's transfer: the display is the
+  // surface that matters there, and the strip stays only to say the camera is
+  // not running.
+  sightSize('glance');
+}
+
+// Called once per camera frame from both scan loops.
+function sightFrame(now, decoded, luma) {
+  if (decoded) {
+    if (!sight.lockedSince) sight.lockedSince = now;
+    sight.lastDecode = now;
+  } else if (now - sight.lastDecode > SIGHT_LOCK_MS) {
+    sight.lockedSince = 0;
+  }
+
+  if (sight.lockedSince) {
+    if (sight.word !== 'receiving') sightSay('locked', 'lock');
+    // Stand down once the lock has held. Mid-transfer the useful readout is the
+    // progress bar, and a large rectangle of handheld video competes with it.
+    // It comes straight back the moment the lock breaks.
+    if (now - sight.lockedSince > SIGHT_SETTLE_MS) sightSize('glance');
+    return;
+  }
+
+  const dark = tooDark(luma);
+  sightSay(dark ? 'too dark' : 'searching', dark ? 'warn' : 'find');
+  sightSize('align');
+}
+
+// A stride sample, about 4k pixels out of two million. Not photometry: it exists
+// so that "nothing is landing" can say why. QR decoding dies on dynamic range
+// long before it dies on framing, and a receiver in a dim room otherwise gets a
+// preview that looks fine and a transfer that never starts. Both conditions have
+// to hold, so a bright scene with one dark corner never trips it.
+function tooDark(luma) {
+  let lo = 255, hi = 0, sum = 0, n = 0;
+  const step = Math.max(1, (luma.length / 4096) | 0);
+  for (let i = 0; i < luma.length; i += step) {
+    const v = luma[i];
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+    sum += v;
+    n++;
+  }
+  return n > 0 && hi - lo < DARK_SPREAD && sum / n < DARK_MEAN;
+}
+
+// ---------------------------------------------------------------------------
 // audio feedback
 // ---------------------------------------------------------------------------
 
@@ -189,12 +331,9 @@ async function beReceiver() {
   // sender instead.
   paint($('display'), render_qr(pairReqBytes, BEACON_ECC, 6));
 
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+  const { stream, video } = await openCamera({
+    facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 },
   });
-  const video = $('camera');
-  video.srcObject = stream;
-  await video.play();
   await takeWakeLock();
 
   const cv = document.createElement('canvas');
@@ -230,6 +369,8 @@ async function beReceiver() {
     }
 
     const frame = decode_qr(luma, cv.width, cv.height);
+    sightFrame(performance.now(), frame != null, luma);
+
     if (frame) {
       // A staged payload plus a scanned PAIR_REQ flips this device from
       // receiver to sender. Frame type lives at offset 3, after magic and
@@ -238,7 +379,7 @@ async function beReceiver() {
       // simply meant for the other role.
       if (staged && frame.length > 3 && frame[3] === 0x01) {
         state.stop = true;
-        stream.getTracks().forEach((t) => t.stop());
+        closeCamera(stream);
         $('scan-to-send').hidden = true;
         setTimeout(async () => {
           state.stop = false;
@@ -268,6 +409,7 @@ async function beReceiver() {
 
       if (r.kind === 'progress' || r.kind === 'beacon') {
         lastSymbol = performance.now();
+        sightSay('receiving', 'lock');
         click(r.fraction);
         setProgress(r.fraction, r.received, r.needed);
       }
@@ -284,6 +426,7 @@ async function beReceiver() {
       if (r.kind.startsWith('error')) {
         if (r.kind.includes('authentication')) {
           state.stop = true;
+          closeCamera(stream, 'stopped', 'warn');
           currentHint = null;
           $('hint').textContent =
             'Authentication failed. The data was altered in transit, or the '
@@ -320,7 +463,7 @@ async function beReceiver() {
 }
 
 async function finish(recv, payload) {
-  $('camera').srcObject?.getTracks().forEach((t) => t.stop());
+  closeCamera($('camera').srcObject, 'done', 'ok');
   setProgress(1, 1, 1);
   $('hint').textContent = 'Verified. Delivered.';
 
@@ -441,12 +584,9 @@ async function beSender(payload, pairReqBytes) {
 // Open the camera just long enough to catch one frame of a given type, then
 // close it. Used for the REVEAL and COMPLETE scans on the sending device.
 async function scanOneFrame(wantType) {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: 'environment', width: { ideal: 1920 } },
+  const { stream, video } = await openCamera({
+    facingMode: 'environment', width: { ideal: 1920 },
   });
-  const video = $('camera');
-  video.srcObject = stream;
-  await video.play();
   const cv = document.createElement('canvas');
   const ctx = cv.getContext('2d', { alpha: false, willReadFrequently: true });
 
@@ -463,10 +603,13 @@ async function scanOneFrame(wantType) {
         luma[i] = (d[j] * 54 + d[j + 1] * 183 + d[j + 2] * 19) >> 8;
       }
       const f = decode_qr(luma, cv.width, cv.height);
+      // A decode of the wrong frame type still proves aim: the camera is on a
+      // screen and reading it. Report it as a lock, then keep waiting.
+      sightFrame(performance.now(), f != null, luma);
       if (f && f.length > 3 && f[3] === wantType) return f;
     }
   } finally {
-    stream.getTracks().forEach((t) => t.stop());
+    closeCamera(stream);
   }
 }
 
@@ -509,6 +652,14 @@ async function main() {
 
   $('own-build').textContent = hex(currentBuildHash());
   $('symbol-size').textContent = default_symbol_size();
+
+  // One tap on the preview resizes it, and after that tap it stops resizing
+  // itself. A control that keeps moving after you have positioned it is worse
+  // than one that never moved.
+  $('sight-resize').onclick = () => {
+    sight.manual = true;
+    sightSize(sight.size === 'align' ? 'glance' : 'align', true);
+  };
 
   if ('serviceWorker' in navigator) {
     const reg = await navigator.serviceWorker.register('./sw.js');

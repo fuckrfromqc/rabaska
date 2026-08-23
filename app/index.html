@@ -22,8 +22,32 @@
   <p class="eyebrow">Optical transfer</p>
   <p class="tag">Nothing here touches the network. Turn on airplane mode and try it.</p>
 
-  <canvas id="display" aria-label="optical frame"></canvas>
-  <video id="camera" playsinline muted hidden></video>
+  <!-- The optical bench: the two surfaces this device has. Above, what it
+       SHOWS; below, what it SEES. They are framed alike because they are the
+       same instrument seen from both ends, and having only the first one on
+       screen is why aiming a receiver used to be guesswork.
+
+       The viewfinder is never drawn over the canvas. That canvas is the
+       transmit antenna: anything laid on top of it, at any opacity, is
+       modulation the far camera has to fight. -->
+  <div class="bench">
+    <canvas id="display" aria-label="optical frame"></canvas>
+
+    <figure id="sight" class="sight" data-tone="off" data-size="glance">
+      <div class="sight-view">
+        <video id="camera" playsinline muted></video>
+        <!-- Guidance, not a boundary: the decoder scans the whole frame. The
+             brackets exist so there is something to centre on. -->
+        <div class="reticle" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+        <button id="sight-resize" type="button" class="sight-resize">Shrink camera preview</button>
+      </div>
+      <figcaption>
+        <span class="sight-label">camera</span>
+        <span class="spacer"></span>
+        <span class="sight-chip"><span class="dot"></span><b id="sight-word">off</b></span>
+      </figcaption>
+    </figure>
+  </div>
 
   <p id="hint">Starting…</p>
 
