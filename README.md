@@ -27,9 +27,14 @@ QR renders, `getUserMedia` opens, and a QR held in front of the camera decodes
 through the wasm and reaches the receiver's pipeline. With the network cut, the
 app reloads from its own precache and still does all of it.
 
+`tools/e2e.mjs` runs the whole PAIR flow between two instances of the built app
+on two origins, with each one's camera fed from the other's screen: beacon,
+commitment, reveal, matching SAS on both sides, symbols, AEAD, completion frame,
+and the payload asserted back byte for byte.
+
 Still unrun: two real devices, two real cameras, one pointed at the other. A
-synthetic camera feed does not have handshake, rolling shutter, autofocus or a
-human holding it, and those are what the ladder exists for.
+synthetic camera feed has no blur, no rolling shutter, no autofocus and no human
+holding it, and those are what the ladder exists for.
 
 ```
 cargo test --release --all                       39 tests
@@ -54,6 +59,7 @@ cargo run -p rabaska-harness -- vectors frozen test vectors
 | `app/` | Shell, service worker, CSP. Runs: boots, decodes, works offline. |
 | `app/` viewfinder | Live camera preview with a decode-state readout, for aiming. |
 | `tools/serve.py` | Local server that applies `_headers`, so the CSP is enforced. |
+| `tools/e2e.mjs` | Two app instances, screen to camera, full PAIR flow, byte-exact. |
 | `build.sh` | wasm-pack, base64 inlining, build stamping, precache manifest. |
 | `codec/` | Not started. Phase 2. |
 

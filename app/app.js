@@ -555,6 +555,12 @@ async function beSender(payload, pairReqBytes) {
         $('hint').classList.add('danger');
         return;
       }
+      // The aiming instruction has been satisfied by the time the reveal
+      // lands, and leaving it up tells someone to keep pointing the phone while
+      // the screen is in fact asking them to read five digits and decide. This
+      // is the one step in the product where a human is the security boundary,
+      // so the instruction has to be the one they are actually being given.
+      $('hint').textContent = 'Compare the digits with the other screen.';
       $('sas').textContent = digits;
       $('sas-panel').hidden = false;
       $('sas-confirm').hidden = false;

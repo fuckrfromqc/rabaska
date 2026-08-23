@@ -42,6 +42,27 @@ Then look at it locally:
 Open `http://127.0.0.1:8080`. localhost counts as a secure context, so the
 camera and the service worker both work.
 
+Then the full flow, two devices, without leaving the machine:
+
+```bash
+python3 tools/serve.py dist 8095 &
+python3 tools/serve.py dist 8094 &
+npm i playwright && node tools/e2e.mjs
+```
+
+Two ports because two origins means two IndexedDBs and therefore two
+identities; on one origin the pair would silently share one and the handshake
+under test would not be the real one. It drives PAIR from both sides — beacon,
+commitment, reveal, matching SAS on both screens, symbols, AEAD, completion
+frame — and asserts the payload comes back byte for byte. The only substitution
+is the camera: each page's `getUserMedia` returns a canvas whose contents are
+the other page's `#display`. Everything between those two canvases is the
+shipped code and the shipped wasm.
+
+It cannot replace two phones. There is no blur, no rolling shutter, no
+autofocus and no hands, so it proves the protocol and the shell are correct and
+says nothing about whether the ladder is fast enough at arm's length.
+
 **Do not use `python3 -m http.server` for this.** It serves none of the headers
 in `_headers`, so the CSP that governs production is simply absent and the app
 you are looking at is not the app you deploy. That gap is not theoretical. Under
