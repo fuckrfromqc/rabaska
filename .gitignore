@@ -2,5 +2,5 @@
 **/target
 /dist
 /core/pkg
-node_modules/
+node_modules
 *.bak

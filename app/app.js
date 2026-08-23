@@ -10,6 +10,7 @@
 import init, {
   Identity, Session, Receive, Send,
   render_qr, decode_qr, qr_capacity, default_symbol_size,
+  payload_wrap, payload_unwrap,
 } from './rabaska_core.js';
 import { WASM_BYTES } from './wasm-inline.js';
 
@@ -504,10 +505,20 @@ async function finish(recv, payload) {
   const complete = recv.complete_frame(payload, true);
   if (complete) paint($('display'), render_qr(complete, BEACON_ECC, 8));
 
-  const blob = new Blob([payload], { type: 'application/octet-stream' });
+  // Unwrap AFTER complete_frame, never before: the sender's expected hash is
+  // over the whole payload it handed to the pipeline, envelope included, so
+  // verification has to see the same bytes the sender did.
+  const p = payload_unwrap(payload);
+  const name = p.name || 'rabaska-payload.bin';
+
+  // p.mime is allow-listed in wasm and is null for anything that could script,
+  // which is what keeps a delivered file from becoming a document on this
+  // origin. The extension is what actually decides how it opens once saved.
+  const blob = new Blob([p.body], { type: p.mime || 'application/octet-stream' });
   const a = $('download');
   a.href = URL.createObjectURL(blob);
-  a.download = 'rabaska-payload.bin';
+  a.download = name;
+  a.textContent = `Save ${name}`;
   a.hidden = false;
   await tx('checkpoints', 'readwrite', (o) => o.delete('active'));
 }
@@ -757,18 +768,26 @@ async function main() {
   // which is most of what this app moves.
   $('file').onchange = async (e) => {
     const f = e.target.files[0];
-    if (f) stageSend(new Uint8Array(await f.arrayBuffer()));
+    if (f) stageSend(new Uint8Array(await f.arrayBuffer()), f.name, f.type);
   };
   $('paste').onclick = async () => {
     const t = await navigator.clipboard.readText();
-    if (t) stageSend(new TextEncoder().encode(t));
+    // Pasted text has no filename, so it gets one. Arriving as an extensionless
+    // blob is how a perfectly good key ends up unopenable at the other end.
+    if (t) stageSend(new TextEncoder().encode(t), 'rabaska-note.txt', 'text/plain');
   };
 }
 
 let staged = null;
-function stageSend(bytes) {
-  staged = bytes;
-  $('hint').textContent = `${bytes.length} bytes ready. Scan the other device's code.`;
+function stageSend(bytes, name, mime) {
+  // The name and type travel inside the plaintext, so they are encrypted and
+  // authenticated like the body. A filename is often the most revealing part of
+  // a transfer; it does not go out in the clear.
+  staged = payload_wrap(bytes, name || '', mime || '');
+  // Report the size of the file, not of the envelope around it: the number
+  // should be the one the user recognises from their own filesystem.
+  $('hint').textContent =
+    `${name || 'Payload'} — ${bytes.length} bytes ready. Scan the other device's code.`;
   $('scan-to-send').hidden = false;
 }
 

@@ -687,6 +687,59 @@ pub fn decode_qr(luma: &[u8], width: usize, height: usize) -> Option<Vec<u8>> {
     crate::qr::decode_luma(luma, width, height).ok()
 }
 
+// ---------------------------------------------------------------------------
+// payload envelope
+// ---------------------------------------------------------------------------
+
+/// Attach a filename and MIME type to a body before it enters the pipeline.
+///
+/// Call this on the sending side, on the bytes read from the file, before
+/// handing them to `Send`. The metadata rides inside the plaintext, so it is
+/// encrypted and authenticated with everything else. See `payload`.
+#[wasm_bindgen]
+pub fn payload_wrap(body: &[u8], name: &str, mime: &str) -> Vec<u8> {
+    crate::payload::wrap(body, name, mime)
+}
+
+/// Split a delivered payload back into body and metadata.
+///
+/// Never fails: a payload with no envelope comes back whole with no metadata,
+/// which is what a sender predating the envelope produces.
+#[wasm_bindgen]
+pub fn payload_unwrap(raw: &[u8]) -> PayloadOut {
+    let p = crate::payload::unwrap(raw);
+    PayloadOut {
+        body: p.body,
+        name: p.name,
+        mime: p.mime,
+    }
+}
+
+#[wasm_bindgen]
+pub struct PayloadOut {
+    body: Vec<u8>,
+    name: Option<String>,
+    mime: Option<String>,
+}
+
+#[wasm_bindgen]
+impl PayloadOut {
+    #[wasm_bindgen(getter)]
+    pub fn body(&self) -> Vec<u8> {
+        self.body.clone()
+    }
+    /// Sanitised, or nothing. Safe to use as a download filename.
+    #[wasm_bindgen(getter)]
+    pub fn name(&self) -> Option<String> {
+        self.name.clone()
+    }
+    /// Allow-listed, or nothing. Safe to give a blob on this origin.
+    #[wasm_bindgen(getter)]
+    pub fn mime(&self) -> Option<String> {
+        self.mime.clone()
+    }
+}
+
 /// Usable byte budget of a QR rung, for driving the ladder from JS.
 #[wasm_bindgen]
 pub fn qr_capacity(version: u8, ecc: u8) -> usize {

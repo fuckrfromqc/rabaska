@@ -54,6 +54,7 @@ cargo run -p rabaska-harness -- vectors frozen test vectors
 | `core/src/pipeline.rs` | Sniff, zstd, AEAD, RaptorQ, transmitter and receiver state machines |
 | `harness/` | End-to-end driver, channel model, vector generator |
 | `vectors/v2.json` | Frozen. CI fails on any diff. |
+| `core/src/payload.rs` | Filename and MIME as an authenticated trailer. Sanitised. |
 | `core/src/qr.rs` | Byte-mode encode, luma render, decode. Measured capacities. |
 | `core/src/wasm.rs` | Browser API surface. No private key crosses it. |
 | `app/` | Shell, service worker, CSP. Runs: boots, decodes, works offline. |

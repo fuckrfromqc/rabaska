@@ -23,8 +23,19 @@ import { chromium } from 'playwright';
 
 const A_PORT = Number(process.env.A_PORT || 8095);
 const B_PORT = Number(process.env.B_PORT || 8094);
-const PAYLOAD = process.env.PAYLOAD
-  || 'the rabaska canoe carries a lot in one crossing — e2e test payload';
+// A real file, not a string: a name with an extension, a MIME type, and a body
+// containing every one of the 256 byte values so that any UTF-8 coercion
+// anywhere in the path shows up as a mismatch rather than as a file that only
+// looks fine. The transfer completing is not the assertion; arriving as this
+// exact file is.
+const FILE_NAME = 'holiday photo.jpg';
+const FILE_MIME = 'image/jpeg';
+const FILE_BYTES = Buffer.concat([
+  Buffer.from([0xff, 0xd8, 0xff, 0xe0]),                    // JPEG magic
+  Buffer.from(Array.from({ length: 256 }, (_, i) => i)),    // every byte value
+  Buffer.from('rabaska carries a lot in one crossing', 'utf8'),
+  Buffer.from(Array.from({ length: 1024 }, (_, i) => (i * 37) & 0xff)),
+]);
 
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM || undefined,
@@ -33,7 +44,7 @@ const browser = await chromium.launch({
 
 async function device(name, port) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 900 } });
-  await ctx.addInitScript((payload) => {
+  await ctx.addInitScript(() => {
     const feed = document.createElement('canvas');
     feed.width = 1024;
     feed.height = 1024;
@@ -65,7 +76,7 @@ async function device(name, port) {
     // later scan has to be able to reopen — the path DEPLOY.md flags as the
     // one least trusted.
     navigator.mediaDevices.getUserMedia = async () => feed.captureStream(15);
-    navigator.clipboard.readText = async () => payload;
+    navigator.clipboard.readText = async () => 'unused: this run stages a file';
 
     // Keep the Blob the app hands to createObjectURL. Reading the bytes back
     // through fetch(blob:) is what you would reach for and it does not work
@@ -76,7 +87,7 @@ async function device(name, port) {
       window.__lastBlob = obj;
       return createObjectURL(obj);
     };
-  }, PAYLOAD);
+  });
   const page = await ctx.newPage();
   page.on('console', (m) => {
     if (m.text().includes('rabaska')) console.log(`  [${name}] ${m.text()}`);
@@ -148,8 +159,10 @@ async function waitFor(page, name, desc, pred, ms) {
 
 let failed = false;
 try {
-  await B.click('#paste');
-  await waitFor(B, 'B', 'payload staged', (s) => s.hint.includes('bytes ready'), 5000);
+  await B.setInputFiles('#file', {
+    name: FILE_NAME, mimeType: FILE_MIME, buffer: FILE_BYTES,
+  });
+  await waitFor(B, 'B', 'file staged', (s) => s.hint.includes('bytes ready'), 5000);
 
   aimed = true; // the two devices are now pointed at each other
   await waitFor(B, 'B', "scanned A's PAIR_REQ, flipped to sender",
@@ -178,15 +191,37 @@ try {
   // claim; this reads the bytes back out of the blob it is offering and checks
   // them against what was sent. A transfer that ends in a green message and the
   // wrong bytes is the only failure worse than one that visibly breaks.
-  const received = await A.evaluate(async () => {
+  const got = await A.evaluate(async () => {
     if (!window.__lastBlob) throw new Error('no blob was ever created');
-    return await window.__lastBlob.text();
+    const a = document.getElementById('download');
+    return {
+      bytes: Array.from(new Uint8Array(await window.__lastBlob.arrayBuffer())),
+      type: window.__lastBlob.type,
+      download: a.getAttribute('download'),
+    };
   });
-  if (received !== PAYLOAD) {
-    throw new Error(`PAYLOAD MISMATCH\n  sent:     ${JSON.stringify(PAYLOAD)}\n`
-      + `  received: ${JSON.stringify(received)}`);
+
+  const sent = Array.from(FILE_BYTES);
+  if (got.bytes.length !== sent.length) {
+    throw new Error(`LENGTH MISMATCH: sent ${sent.length}, received ${got.bytes.length}`);
   }
-  console.log(`✓ payload round-trips byte for byte (${received.length} bytes)`);
+  const at = got.bytes.findIndex((b, i) => b !== sent[i]);
+  if (at !== -1) {
+    throw new Error(`BYTE MISMATCH at offset ${at}: sent ${sent[at]}, received ${got.bytes[at]}`);
+  }
+  console.log(`✓ body round-trips byte for byte (${got.bytes.length} bytes, all 256 values)`);
+
+  if (got.download !== FILE_NAME) {
+    throw new Error(`FILENAME LOST: sent ${JSON.stringify(FILE_NAME)}, `
+      + `receiver offers ${JSON.stringify(got.download)}`);
+  }
+  console.log(`✓ filename preserved: ${JSON.stringify(got.download)}`);
+
+  if (got.type !== FILE_MIME) {
+    throw new Error(`TYPE LOST: sent ${JSON.stringify(FILE_MIME)}, `
+      + `received ${JSON.stringify(got.type)}`);
+  }
+  console.log(`✓ type preserved: ${got.type}`);
   console.log(`✓ A offers the file, and saw peer build ${end.peer}`);
   console.log('\n=== END TO END: PASS ===');
 } catch (e) {

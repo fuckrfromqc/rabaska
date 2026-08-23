@@ -312,3 +312,37 @@ sees a setting.
 - **Large payloads.** The ergonomic ceiling is holding two devices aligned, which is
   pleasant for one second and miserable for three minutes. The protocol is correct at
   100 MB and the product is not.
+
+## Payload envelope
+
+Above the protocol, not part of it. `wire` is untouched by this and the frozen
+vectors do not move: the pipeline still carries an opaque blob, and this is
+what that blob contains.
+
+```text
+[ body ][ name ][ mime ][ name_len: u8 ][ mime_len: u8 ][ version: u8 ][ "RBKP" ]
+```
+
+Seven bytes plus the two strings, appended to the body. It exists because a
+delivered file with no name and no type is one the receiving system will not
+open, which is a failed delivery whatever the bytes say.
+
+**A trailer, not a header.** `pipeline::is_already_compressed` decides whether
+to run zstd by sniffing magic bytes at offset 0. A header would sit there
+instead, so every JPEG, PDF and zip would look compressible and be run through
+the compressor for nothing. At the end, the file's own magic stays where the
+sniffer looks.
+
+**Inside the plaintext**, so the name and type are encrypted and authenticated
+with the body. A filename is frequently the most revealing part of a transfer.
+
+**Absent is legal.** A payload whose last four bytes are not the magic, or whose
+lengths do not fit, is returned whole with no metadata. That is what a sender
+predating this envelope produces, and refusing to deliver a file because its
+label is malformed would be the worse failure.
+
+**Both strings are sanitised on receipt**, not merely on send. The peer is
+authenticated, but a hostile peer is the threat model: names are reduced to a
+bare filename with no path, no control characters and a bounded length, and
+MIME types are allow-listed to those that cannot script, because the body
+becomes a `blob:` URL on the origin that stores the identity key.

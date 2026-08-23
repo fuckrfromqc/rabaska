@@ -8,6 +8,7 @@
 //! [`crypto`] are frozen: they are baked into stored pairings on user devices.
 
 pub mod crypto;
+pub mod payload;
 pub mod pipeline;
 pub mod qr;
 pub mod wire;
