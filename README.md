@@ -19,9 +19,17 @@ Full runbook in [docs/DEPLOY.md](docs/DEPLOY.md).
 ## Status
 
 Phase 1. The protocol runs end to end across all four key agreement modes, and
-frames now go out as real pixels and come back decoded from real pixels. The
-browser shell is written but unrun: no wasm toolchain and no camera in the
-build environment used so far.
+frames now go out as real pixels and come back decoded from real pixels.
+
+The browser shell has now been built and run. In headless Chromium, served with
+the production headers: the wasm instantiates from its inlined bytes, the reverse
+QR renders, `getUserMedia` opens, and a QR held in front of the camera decodes
+through the wasm and reaches the receiver's pipeline. With the network cut, the
+app reloads from its own precache and still does all of it.
+
+Still unrun: two real devices, two real cameras, one pointed at the other. A
+synthetic camera feed does not have handshake, rolling shutter, autofocus or a
+human holding it, and those are what the ladder exists for.
 
 ```
 cargo test --release --all                       39 tests
@@ -43,7 +51,9 @@ cargo run -p rabaska-harness -- vectors frozen test vectors
 | `vectors/v2.json` | Frozen. CI fails on any diff. |
 | `core/src/qr.rs` | Byte-mode encode, luma render, decode. Measured capacities. |
 | `core/src/wasm.rs` | Browser API surface. No private key crosses it. |
-| `app/` | Shell, service worker, CSP. Written, never run. |
+| `app/` | Shell, service worker, CSP. Runs: boots, decodes, works offline. |
+| `app/` viewfinder | Live camera preview with a decode-state readout, for aiming. |
+| `tools/serve.py` | Local server that applies `_headers`, so the CSP is enforced. |
 | `build.sh` | wasm-pack, base64 inlining, build stamping, precache manifest. |
 | `codec/` | Not started. Phase 2. |
 

@@ -32,5 +32,26 @@
 
 # The service worker must never be served stale, or deployed updates are
 # invisible until the HTTP cache expires.
+#
+# It also needs its own CSP, and this is not a detail. A CSP served with a
+# worker script governs that worker's global scope, and `cache.addAll` fetches
+# through it like anything else. Under the `/*` policy above the worker inherits
+# `connect-src 'none'`, so every precache fetch is refused, install rejects, and
+# the app is left with no offline capability at all — silently, because a failed
+# install has no symptom until someone turns the network off and finds out. That
+# is the product's headline claim failing closed with no error anywhere.
+#
+# So the worker gets `connect-src 'self'` and nothing else opens up. This does
+# not touch the page's policy: the page still cannot fetch, cannot connect, and
+# cannot transmit, which is the claim a sceptical user verifies with curl. And
+# the worker cannot be turned into a courier for the page, because it fetches
+# only its own origin (enforced twice: here, and by the origin check in its
+# fetch handler), and it answers exactly two postMessage types, neither of which
+# fetches anything.
+#
+# Rules are applied in order and the later, more specific one wins, so this
+# block replaces the CSP above for this path only. Verify that after every
+# deploy — see DEPLOY.md 2.5.
 /sw.js
   Cache-Control: no-cache
+  Content-Security-Policy: default-src 'none'; script-src 'self'; connect-src 'self'; base-uri 'none'

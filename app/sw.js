@@ -34,9 +34,19 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     (async () => {
       const cache = await caches.open(CACHE);
-      // No-store so an intermediary cache cannot serve a stale or substituted
-      // bundle into the precache.
-      await cache.addAll(PRECACHE.map((u) => new Request(u, { cache: 'no-store' })));
+      try {
+        // No-store so an intermediary cache cannot serve a stale or substituted
+        // bundle into the precache.
+        await cache.addAll(PRECACHE.map((u) => new Request(u, { cache: 'no-store' })));
+      } catch (e) {
+        // A rejected install is invisible by default: no worker activates, no
+        // error surfaces, and the app looks fine until the network goes away.
+        // That silence is how a CSP that forbade these very fetches shipped and
+        // stayed hidden. Tell the page, which turns its "offline" chip honest.
+        const clients = await self.clients.matchAll({ includeUncontrolled: true });
+        for (const c of clients) c.postMessage({ precacheFailed: String(e) });
+        throw e;
+      }
       // Deliberately NOT skipWaiting(). The new build waits.
     })()
   );

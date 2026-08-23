@@ -36,14 +36,23 @@ beyond rustup and the wasm32 target — no Xcode, no Homebrew LLVM.
 Then look at it locally:
 
 ```bash
-cd dist && python3 -m http.server 8080
+./build.sh && python3 tools/serve.py
 ```
 
-Open `http://localhost:8080`. `localhost` counts as a secure context, so the
-camera works. The service worker will not honour `_headers` here (that is a
-Cloudflare feature), so the CSP is not enforced locally. That is worth knowing:
-**a fetch that works locally may still be blocked in production.** The CI job
-`app never calls fetch` is what guards that gap.
+Open `http://127.0.0.1:8080`. localhost counts as a secure context, so the
+camera and the service worker both work.
+
+**Do not use `python3 -m http.server` for this.** It serves none of the headers
+in `_headers`, so the CSP that governs production is simply absent and the app
+you are looking at is not the app you deploy. That gap is not theoretical. Under
+`http.server` the service worker installs cleanly and caches all twelve entries.
+In production the `/*` CSP also lands on the worker script, and therefore on the
+worker's own scope, where `connect-src 'none'` refuses every `cache.addAll`
+fetch: install rejects, no worker activates, and the offline claim quietly stops
+being true — with no error anywhere, because a failed install has no symptom
+until the network goes away. `tools/serve.py` applies the real headers, which is
+the only way to see that locally. `/sw.js` now carries its own CSP, and
+`build.sh` fails the build if that ever regresses.
 
 ---
 
@@ -124,6 +133,22 @@ curl -sI https://rabaska.favreau.xyz | grep -iE "content-security|strict-transpo
 Both headers must appear, and the CSP must contain `connect-src 'none'`. If
 they are absent, `_headers` was not picked up and the app's central claim is
 not being enforced — stop and investigate before using it for anything real.
+
+The service worker's policy is separate and must also be checked:
+
+```bash
+curl -sI https://rabaska.favreau.xyz/sw.js | grep -i content-security
+```
+
+This one must say `connect-src 'self'`. If it says `'none'`, the more specific
+`_headers` rule did not take precedence over `/*`, the precache cannot fetch,
+and the app still needs the network on every load. Then run the test the README
+promises: load the app, turn the network off, reload. It must come back. A
+browser error page means no worker installed.
+
+The app says so itself either way. The chip in the header reads `offline` only
+once a worker is actually active, and `online only` when none is — it reports
+the state rather than asserting the claim.
 
 ### 2.6 Zero Trust: leave Rabaska outside
 

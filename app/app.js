@@ -626,6 +626,39 @@ async function takeWakeLock() {
   }
 }
 
+// The chip in the header is the product's headline claim in four letters, and
+// it is the two-second test a sceptical user runs. So it reports rather than
+// asserts: it reads "offline" only once a worker is active, which is the only
+// state in which turning the network off actually leaves a working app.
+//
+// It says "online only" instead of nothing when the worker never installs. That
+// case is not hypothetical — the deployed CSP forbade the precache's own
+// fetches, and because a rejected install is silent, the app looked perfect
+// while being entirely dependent on the network.
+function setOfflineChip(state) {
+  $('offline-chip').dataset.state = state;
+  $('offline-word').textContent = state === 'ready' ? 'offline' : 'online only';
+  $('offline-chip').title = state === 'ready'
+    ? 'Precached. Turn the network off and this still works.'
+    : 'No service worker installed: nothing is cached and this still needs the network.';
+}
+
+async function trackOfflineReadiness(reg) {
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data?.precacheFailed) console.error('rabaska: precache failed:', e.data.precacheFailed);
+  });
+  // Polled rather than chased through statechange events. The worker moves
+  // installing -> installed -> activating -> activated across three different
+  // registration slots, and tracking that correctly is far more code than one
+  // chip is worth.
+  const deadline = performance.now() + 10000;
+  while (performance.now() < deadline) {
+    if (reg.active) return setOfflineChip('ready');
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  setOfflineChip('none');
+}
+
 // No fetch anywhere in this file. The CSP sets connect-src 'none', so a fetch
 // would not merely be impolite, it would throw. The build hash is stamped in at
 // build time instead of being recomputed at runtime.
@@ -671,6 +704,9 @@ async function main() {
       reg.waiting?.postMessage('rabaska:activate-update');
       location.reload();
     };
+    trackOfflineReadiness(reg); // deliberately not awaited: boot does not wait
+  } else {
+    setOfflineChip('none');
   }
 
   // Role is implied, not chosen: on open you are a receiver showing your code,

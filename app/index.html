@@ -14,7 +14,9 @@
   <div class="inner">
     <div class="brand">rabaska<span>.favreau.xyz</span></div>
     <div class="spacer"></div>
-    <span class="buildchip"><span class="dot"></span>offline</span>
+    <!-- Not a label. This says "offline" only once a worker is actually
+         active and the precache is populated; see setOfflineChip(). -->
+    <span class="buildchip" id="offline-chip" data-state="pending"><span class="dot"></span><span id="offline-word">checking</span></span>
   </div>
 </header>
 

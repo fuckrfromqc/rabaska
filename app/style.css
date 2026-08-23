@@ -91,6 +91,11 @@ header.site > .inner {
   width: 6px; height: 6px; border-radius: 50%;
   background: var(--dot-ok); flex: none;
 }
+/* The green dot is a claim, so it is not the default: it appears once a service
+   worker is active and the precache holds. */
+.buildchip[data-state="pending"] .dot { background: var(--line-strong); }
+.buildchip[data-state="none"] .dot { background: var(--warn-ink); }
+.buildchip[data-state="none"] { color: var(--warn-ink); border-color: var(--warn-line); background: var(--warn-bg); }
 
 main { max-width: 30rem; margin: 0 auto; padding: 22px 0 56px; }
 

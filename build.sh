@@ -86,6 +86,42 @@ sed -i.bak "s|__BUILD_HASH__|$BUILD|g" "$OUT/app.js" && rm -f "$OUT/app.js.bak"
 echo "==> verifying"
 grep -q "__BUILD_HASH__" "$OUT"/*.js && { echo "FAIL: unsubstituted build hash"; exit 1; }
 grep -q "connect-src 'none'" "$OUT/_headers" || { echo "FAIL: CSP lost connect-src none"; exit 1; }
+
+# The page's connect-src must be 'none' and the service worker's must not be.
+# A CSP served with a worker script governs that worker, and cache.addAll
+# fetches through it: inheriting 'none' makes every precache fetch fail, the
+# install reject, and the offline claim quietly stop being true. That exact
+# combination shipped once. It does not get to ship twice.
+python3 - "$OUT/_headers" <<'PY'
+import re, sys
+rules, current = [], None
+for line in open(sys.argv[1]):
+    if not line.strip() or line.lstrip().startswith('#'):
+        continue
+    if not line.startswith((' ', '\t')):
+        current = {}
+        rules.append((line.strip(), current))
+    elif current is not None:
+        k, _, v = line.strip().partition(':')
+        current[k.strip()] = v.strip()
+
+
+def csp_for(path):
+    out = {}
+    for pattern, headers in rules:
+        if re.match('^' + re.escape(pattern).replace(r'\*', '.*') + '$', path):
+            out.update(headers)
+    return out.get('Content-Security-Policy', '')
+
+
+page, worker = csp_for('/index.html'), csp_for('/sw.js')
+if "connect-src 'none'" not in page:
+    sys.exit("FAIL: the page CSP must keep connect-src 'none'")
+if "connect-src 'self'" not in worker:
+    sys.exit("FAIL: /sw.js needs its own CSP with connect-src 'self', or the "
+             "precache cannot fetch and the app silently loses offline support")
+print('    CSP split verified: page connect-src none, worker connect-src self')
+PY
 if grep -n "fetch(" "$OUT/app.js" | grep -v '^\s*//'; then
   echo "FAIL: app.js calls fetch, which connect-src 'none' will block"; exit 1
 fi
