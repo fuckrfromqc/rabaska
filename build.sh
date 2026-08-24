@@ -98,6 +98,16 @@ PY
 
 sed -i.bak "s|__BUILD_HASH__|$BUILD|g" "$OUT/app.js" && rm -f "$OUT/app.js.bak"
 
+# Every executable piece says which build it belongs to, so the shell can refuse
+# to run against a wasm module it was not compiled against. They are three
+# separate HTTP cache entries and a browser will happily assemble one from each
+# of two deployments; when the argument lists have moved in between, the app
+# dies at startup inside generated code with nothing on screen to explain it.
+#
+# Appended after the hash is computed, so this does not feed back into it.
+echo "export const GLUE_BUILD = '$BUILD';" >> "$OUT/rabaska_core.js"
+echo "export const WASM_BUILD = '$BUILD';" >> "$OUT/wasm-inline.js"
+
 echo "==> verifying"
 grep -q "__BUILD_HASH__" "$OUT"/*.js && { echo "FAIL: unsubstituted build hash"; exit 1; }
 grep -q "connect-src 'none'" "$OUT/_headers" || { echo "FAIL: CSP lost connect-src none"; exit 1; }

@@ -12,7 +12,9 @@ import init, {
   render_qr, decode_qr, qr_capacity, default_symbol_size,
   payload_wrap, payload_unwrap,
 } from './rabaska_core.js';
-import { WASM_BYTES } from './wasm-inline.js';
+import * as core from './rabaska_core.js';
+import * as inlined from './wasm-inline.js';
+const { WASM_BYTES } = inlined;
 
 // Stamped by build.sh over every precached byte of the app. Displayed next to
 // the peer's during a transfer: two devices running different code is then
@@ -372,10 +374,23 @@ async function beReceiver() {
   // sender for a corruption it had introduced itself. `restore` drops a
   // checkpoint whose session does not match the beacon, so a stale one now
   // costs nothing but the bytes it occupied.
-  const saved = await get('checkpoints', CHECKPOINT_KEY);
-  if (saved?.session && saved.packets?.length) {
-    recv.restore(saved.session, saved.packets.map((a) => new Uint8Array(a)));
-    $('hint').textContent = `Resuming: ${saved.packets.length} symbols already collected.`;
+  //
+  // Wrapped because resume is an optimisation and must never be a reason the
+  // app will not start. A record in an older format, a corrupt one, or a wasm
+  // module from a different build than this file all end the same way here: the
+  // checkpoint is discarded and the transfer begins from nothing, which costs
+  // time and nothing else.
+  try {
+    const saved = await get('checkpoints', CHECKPOINT_KEY);
+    if (saved?.session && saved.packets?.length) {
+      recv.restore(saved.session, saved.packets.map((a) => new Uint8Array(a)));
+      $('hint').textContent = `Resuming: ${saved.packets.length} symbols already collected.`;
+    }
+  } catch (e) {
+    console.warn('rabaska: checkpoint discarded:', e.message);
+    try {
+      await tx('checkpoints', 'readwrite', (o) => o.delete(CHECKPOINT_KEY));
+    } catch { /* nothing to clean up */ }
   }
 
   // Show the reverse QR immediately. Being a receiver is the resting state:
@@ -865,7 +880,58 @@ function currentBuildHash() {
   return out;
 }
 
+// This file, the generated glue and the inlined module are three separate HTTP
+// cache entries, and nothing about fetching them makes the three arrive from
+// the same build. A shell talking to a wasm module it was not compiled against
+// is not a subtle bug: an argument list that no longer matches throws inside
+// the generated glue at startup, before anything is on screen, and the app is
+// simply dead. That shipped, as `Startup failed: arg.charCodeAt is not a
+// function` on devices holding a checkpoint.
+//
+// So the pieces say which build they are and this refuses to run a mismatched
+// set. Caches are cleared and the page reloaded once — once, tracked in
+// sessionStorage, because a reload loop is worse than the problem. If the
+// second attempt is still mismatched the origin is genuinely serving a mixed
+// set, and saying so is more use than failing at a random later call.
+function buildsAgree() {
+  const mine = BUILD;
+  const glue = core.GLUE_BUILD;
+  const wasm = inlined.WASM_BUILD;
+  if (glue === mine && wasm === mine) return true;
+  console.warn(`rabaska: build skew — shell ${mine}, glue ${glue}, wasm ${wasm}`);
+  return false;
+}
+
+const HEALED = 'rabaska:healed-skew';
+
+async function healSkew() {
+  let tried = false;
+  try {
+    tried = sessionStorage.getItem(HEALED) === '1';
+    sessionStorage.setItem(HEALED, '1');
+  } catch { /* private mode: one attempt, unrecorded */ }
+
+  if (tried) {
+    $('hint').textContent = 'This device is being served a mixed set of files. '
+      + 'Reload once more, and if it persists the origin is serving parts of '
+      + 'two different builds.';
+    return false;
+  }
+
+  // Drop the worker's caches first: serving the mismatched set back out of the
+  // precache is exactly how this state survives a reload.
+  try {
+    await Promise.all((await caches.keys()).map((k) => caches.delete(k)));
+    const reg = await navigator.serviceWorker?.getRegistration();
+    await reg?.unregister();
+  } catch { /* nothing cached, or no worker; the reload is what matters */ }
+  location.reload();
+  return false;
+}
+
 async function main() {
+  if (!buildsAgree() && !(await healSkew())) return;
+
   // Instantiate from the inlined bytes rather than letting the generated glue
   // fetch the .wasm file, which connect-src 'none' would block.
   await init(WASM_BYTES);

@@ -13,6 +13,7 @@
 //! encrypted under a passphrase before it leaves.
 
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
 
 use crate::crypto::{self, KeyPair, Role};
 use crate::pipeline::{Frame, Ingest, Receiver, TransmitConfig, Transmitter};
@@ -256,13 +257,31 @@ impl Receive {
     /// are indistinguishable from live ones by inspection: absorbing them
     /// reassembles garbage of the right length, and the receiver reports a
     /// corruption it caused itself.
-    pub fn restore(
-        &mut self,
-        session_hex: &str,
-        packets: Vec<js_sys::Uint8Array>,
-    ) -> Result<(), JsError> {
-        let sid = decode_sid4(session_hex)?;
-        let v: Vec<Vec<u8>> = packets.iter().map(|a| a.to_vec()).collect();
+    ///
+    /// Both arguments are untyped on purpose. The shell is a separately cached
+    /// file and can be older than the wasm it is calling: `app.js`,
+    /// `rabaska_core.js` and the inlined module are three HTTP cache entries
+    /// with nothing binding them to one build. A shell from before this
+    /// signature existed calls `restore(packets)` with no session at all, and
+    /// an array arriving where the generated glue expects a string throws
+    /// `arg.charCodeAt is not a function` — at startup, before anything is on
+    /// screen, on any device that happened to hold a checkpoint.
+    ///
+    /// A checkpoint with no session cannot be matched against a beacon, so
+    /// there is nothing to do with it but drop it. That is already what this
+    /// call should do; the only question was whether it arrives as a dropped
+    /// checkpoint or as an app that will not start. Resume is an optimisation
+    /// and never a precondition for booting.
+    pub fn restore(&mut self, session_hex: JsValue, packets: JsValue) -> Result<(), JsError> {
+        let Some(hex) = session_hex.as_string() else {
+            return Ok(());
+        };
+        let sid = decode_sid4(&hex)?;
+        let v: Vec<Vec<u8>> = js_sys::Array::from(&packets)
+            .iter()
+            .filter_map(|p| p.dyn_into::<js_sys::Uint8Array>().ok())
+            .map(|a| a.to_vec())
+            .collect();
         self.rx.restore(sid, v);
         Ok(())
     }

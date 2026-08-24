@@ -69,6 +69,7 @@ cargo run -p rabaska-harness -- vectors frozen test vectors
 | `tools/e2e.mjs` | Two app instances, screen to camera, byte-exact. Both modes, and two crossings on one profile. |
 | `tools/layout.mjs` | Phone layout invariants, on both the svh and no-svh branches. |
 | `tools/update.mjs` | The service worker update flow, across two real builds. |
+| `tools/skew.mjs` | A shell and a wasm module from different builds, both directions. |
 | `build.sh` | wasm-pack, base64 inlining, build stamping, precache manifest. |
 | `codec/` | Not started. Phase 2. |
 
