@@ -14,7 +14,8 @@
 //   1. A first visit must NOT offer an update. `updatefound` fires for the very
 //      first install too, so the banner was greeting every new visitor with
 //      news about the build they had just loaded.
-//   2. A genuinely new build must be parked and offered once it has installed.
+//   2. A genuinely new build must be discovered, parked and offered — the app
+//      asks on load, because the browser's own check is not dependable.
 //   3. Activating it must land on the NEW build. postMessage then an immediate
 //      location.reload() races skipWaiting, and a reload that wins serves the
 //      OLD build back out of the old worker's cache.
@@ -112,18 +113,27 @@ try {
   console.log(`\n(deployed ${V2} over ${V1})\n`);
 
   await page.reload({ waitUntil: 'load' });
-  await page.waitForTimeout(3000);
-  // Headless Chromium does not reliably run its navigation soft-update inside a
-  // test's patience. Asking explicitly performs the same check the browser does
-  // on navigation, so this reaches the state under test rather than faking it.
-  await page.evaluate(async () => (await navigator.serviceWorker.getRegistration())?.update());
-  for (let i = 0; i < 40 && !(await state()).waiting; i++) await page.waitForTimeout(500);
+  // Nothing is asked on the test's behalf any more. The app calls reg.update()
+  // itself on load, so what is being checked here is the whole discovery path —
+  // notice, park, offer — and not merely the banner logic once something has
+  // been parked by a test that reached in and did it.
+  for (let i = 0; i < 60 && !(await state()).waiting; i++) await page.waitForTimeout(500);
   await page.waitForTimeout(500);
 
   s = await state();
   check('the old build keeps running until it is activated', s.build === V1, `build=${s.build}`);
-  check('the new build is parked and waiting', s.waiting === true);
+  check('the new build is discovered and parked', s.waiting === true);
   check('the banner is offered once it has installed', s.banner === true);
+
+  // Stop here with something readable rather than letting the click below time
+  // out on a button that was never shown. Nothing asks on this test's behalf,
+  // so reaching this point with nothing parked means the app never noticed the
+  // new build at all — which is a different and much worse failure than a
+  // banner that failed to appear.
+  if (!s.waiting || !s.banner) {
+    throw new Error('the app never discovered the new build: '
+      + `waiting=${s.waiting} banner=${s.banner} active=${s.active}`);
+  }
 
   const navigated = page.waitForNavigation({ timeout: 20000 }).catch(() => null);
   await page.click('#update-now');

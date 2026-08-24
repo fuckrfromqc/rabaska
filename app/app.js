@@ -953,6 +953,26 @@ async function main() {
       fresh.addEventListener('statechange', check);
     });
 
+    // Ask, once, on load. The browser is meant to re-check sw.js on navigation
+    // and often does not: headless Chromium did not inside fifteen seconds
+    // during testing, and a home-screen PWA on iOS is worse. Waiting to be told
+    // is therefore not an update policy, it is a way to be stranded — the
+    // worker serves its own cache first and never revalidates, so a device that
+    // installed once stays on that build forever and no fix can ever reach it.
+    // A phone sat on a build nine deploys old with nothing on screen to suggest
+    // anything was wrong.
+    //
+    // This does not weaken "never silently updates". update() downloads the new
+    // worker and parks it in `waiting`; it does not activate it, and it does
+    // not control this page. Activation still needs the explicit tap, which is
+    // the part that policy is actually about. Discovery is not activation.
+    //
+    // Once per load and never on a timer, which is the line sw.js draws.
+    reg.update().catch(() => {
+      // Offline, or the origin is unreachable. The banner simply does not
+      // appear, which is the right outcome rather than something to report.
+    });
+
     $('update-now').onclick = () => {
       const parked = reg.waiting;
       if (!parked) {
