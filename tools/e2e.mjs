@@ -171,7 +171,7 @@ const check_receiver_warned = (r) => {
   if (!r.openWarning) {
     throw new Error('the receiver was NOT told the file arrived unencrypted');
   }
-  console.log('✓ [A] receiver is told the file arrived unencrypted');
+  console.log('✓ [A] receiver identified the transfer as unencrypted, unprompted');
   if (!check_open_warning_on_sender) throw new Error('sender was never warned');
 };
 
@@ -236,10 +236,21 @@ try {
   await waitFor(A, 'A', 'symbols landing', (s) => /\d+ \/ \d+|verifying/.test(s.count), 30000);
   await waitFor(A, 'A', 'reassembled, authenticated, delivered',
     (s) => s.hint.includes('Verified. Delivered.'), 60000);
+  // The receiving side is set up identically in both modes and is never told
+  // which one is coming: it reads the mode off the beacon. These two assertions
+  // are what make that claim testable rather than merely true in the source.
+  const ra = await state(A);
+  if (ra.sendPanel) {
+    throw new Error('the receiver was shown a mode choice; it should never need one');
+  }
+
   if (MODE === 'open') {
-    const r = await state(A);
-    check_receiver_warned(r);
+    check_receiver_warned(ra);
   } else {
+    if (ra.openWarning) {
+      throw new Error('the receiver called an ENCRYPTED transfer unencrypted');
+    }
+    console.log('✓ [A] receiver identified the transfer as encrypted, unprompted');
     await waitFor(B, 'B', 'completion frame scanned, delivery verified',
       (s) => s.hint.includes('Verified delivered'), 30000);
   }
