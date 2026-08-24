@@ -58,3 +58,14 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy dist --project-name=rabaska --branch=main
+
+      # Ask the origin what it serves, rather than trusting that an upload
+      # arrived. The hash above is what was sent; this is what a phone gets.
+      # Report-only: the edge can take a moment, and a lagging probe must never
+      # fail a deploy that worked.
+      - name: verify the live origin
+        continue-on-error: true
+        run: |
+          sleep 25
+          H=$(grep -o "const BUILD = '[0-9a-f]*'" dist/app.js | grep -o "[0-9a-f]\{16\}")
+          tools/probe.sh https://rabaska.favreau.xyz "$H" | tee -a $GITHUB_STEP_SUMMARY
