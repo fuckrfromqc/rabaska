@@ -184,17 +184,30 @@ Both headers must appear, and the CSP must contain `connect-src 'none'`. If
 they are absent, `_headers` was not picked up and the app's central claim is
 not being enforced — stop and investigate before using it for anything real.
 
-The service worker's policy is separate and must also be checked:
+The service worker's policy is separate and must also be checked — and the
+number of policies matters as much as their content:
 
 ```bash
-curl -sI https://rabaska.favreau.xyz/sw.js | grep -i content-security
+curl -sI https://rabaska.favreau.xyz/sw.js | grep -ci content-security-policy   # must be 1
+curl -sI https://rabaska.favreau.xyz/sw.js | grep -i  content-security-policy   # must say 'self'
 ```
 
-This one must say `connect-src 'self'`. If it says `'none'`, the more specific
-`_headers` rule did not take precedence over `/*`, the precache cannot fetch,
-and the app still needs the network on every load. Then run the test the README
-promises: load the app, turn the network off, reload. It must come back. A
-browser error page means no worker installed.
+Cloudflare applies every matching `_headers` rule and **appends** repeated
+headers rather than replacing them. A response carrying two
+`Content-Security-Policy` headers is governed by both at once: a request has to
+satisfy every policy, so a second one can only narrow the first, never widen
+it. That is why the page policy is set on `/` and `/index.html` rather than on
+`/*` — under `/*` the worker was served its own `connect-src 'self'` *and* the
+page's `connect-src 'none'`, the intersection was `'none'`, every precache
+fetch was refused, and the app had no offline support at all. It fails closed
+with no error in the page, so nothing looks wrong from the inside.
+
+A count of 2 here is that bug, whatever the policies say. `tools/probe.sh`
+checks it and exits non-zero; `build.sh` refuses to produce a `_headers` where
+any document path matches more than one CSP rule.
+
+Then run the test the README promises: load the app, turn the network off,
+reload. It must come back. A browser error page means no worker installed.
 
 The app says so itself either way. The chip in the header reads `offline` only
 once a worker is actually active, and `online only` when none is — it reports

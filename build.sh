@@ -107,6 +107,15 @@ grep -q "connect-src 'none'" "$OUT/_headers" || { echo "FAIL: CSP lost connect-s
 # fetches through it: inheriting 'none' makes every precache fetch fail, the
 # install reject, and the offline claim quietly stop being true. That exact
 # combination shipped once. It does not get to ship twice.
+#
+# The count is checked as strictly as the content. Cloudflare APPENDS repeated
+# headers across matching rules, and two policies on one response are both
+# enforced — so a second CSP can only ever narrow the first. A `/sw.js` rule
+# that looks like it grants 'self' grants nothing if a `/*` rule already said
+# 'none'. This guard modelled the merge as a dict and so agreed with itself
+# while the live origin served both headers and the precache failed for every
+# user. Anything matching more than one CSP rule is the bug, whatever the
+# policies say.
 python3 - "$OUT/_headers" <<'PY'
 import re, sys
 rules, current = [], None
@@ -114,28 +123,40 @@ for line in open(sys.argv[1]):
     if not line.strip() or line.lstrip().startswith('#'):
         continue
     if not line.startswith((' ', '\t')):
-        current = {}
+        current = []
         rules.append((line.strip(), current))
     elif current is not None:
         k, _, v = line.strip().partition(':')
-        current[k.strip()] = v.strip()
+        current.append((k.strip(), v.strip()))
 
 
-def csp_for(path):
-    out = {}
+def csps_for(path):
+    """Every CSP that would be sent on this path, in order. Not merged."""
+    out = []
     for pattern, headers in rules:
         if re.match('^' + re.escape(pattern).replace(r'\*', '.*') + '$', path):
-            out.update(headers)
-    return out.get('Content-Security-Policy', '')
+            out += [v for k, v in headers if k.lower() == 'content-security-policy']
+    return out
 
 
-page, worker = csp_for('/index.html'), csp_for('/sw.js')
+for path in ('/', '/index.html', '/sw.js'):
+    n = len(csps_for(path))
+    if n != 1:
+        sys.exit(f"FAIL: {path} would be served {n} Content-Security-Policy "
+                 "headers. Browsers enforce all of them at once, so the "
+                 "effective policy is their intersection and the narrower one "
+                 "wins. Exactly one rule may set a CSP for any given path.")
+
+page, worker = csps_for('/index.html')[0], csps_for('/sw.js')[0]
 if "connect-src 'none'" not in page:
     sys.exit("FAIL: the page CSP must keep connect-src 'none'")
+if csps_for('/')[0] != page:
+    sys.exit("FAIL: / and /index.html must carry the same policy; both are "
+             "precached and either can serve a navigation")
 if "connect-src 'self'" not in worker:
     sys.exit("FAIL: /sw.js needs its own CSP with connect-src 'self', or the "
              "precache cannot fetch and the app silently loses offline support")
-print('    CSP split verified: page connect-src none, worker connect-src self')
+print('    CSP split verified: one policy per document, page none, worker self')
 PY
 if grep -n "fetch(" "$OUT/app.js" | grep -v '^\s*//'; then
   echo "FAIL: app.js calls fetch, which connect-src 'none' will block"; exit 1

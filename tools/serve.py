@@ -29,12 +29,16 @@ PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 8080
 
 
 def load_rules(root):
-    """Parse _headers into [(path pattern, {header: value})], in file order.
+    """Parse _headers into [(path pattern, [(header, value), ...])], in file order.
 
-    Cloudflare applies every matching rule in order and lets a later one
-    overwrite a header an earlier one set, which is what lets `/sw.js` carry a
-    different CSP from `/*`. Reproduce that precedence, or this server will not
-    reproduce the bug it exists to catch.
+    Cloudflare applies every matching rule and APPENDS repeated headers rather
+    than replacing them. This server merged them into a dict instead, so a
+    response that production sends with two Content-Security-Policy headers
+    came back with one here. That is not a cosmetic difference: two policies
+    are both enforced and a request must satisfy both, so the merged version
+    was strictly more permissive than production and reported a precache
+    working that had never worked in the field. A list, not a dict, because
+    the duplication is the behaviour being reproduced.
     """
     rules, current = [], None
     path = os.path.join(root, '_headers')
@@ -44,11 +48,11 @@ def load_rules(root):
         if not line.strip() or line.lstrip().startswith('#'):
             continue
         if not line.startswith((' ', '\t')):
-            current = {}
+            current = []
             rules.append((line.strip(), current))
         elif current is not None:
             key, _, value = line.strip().partition(':')
-            current[key.strip()] = value.strip()
+            current.append((key.strip(), value.strip()))
     return rules
 
 
@@ -60,13 +64,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         super().__init__(*a, directory=ROOT, **kw)
 
     def end_headers(self):
-        applied = {}
+        path = self.path.split('?')[0]
         for pattern, headers in RULES:
             rx = '^' + re.escape(pattern).replace(r'\*', '.*') + '$'
-            if re.match(rx, self.path.split('?')[0]):
-                applied.update(headers)  # later rule wins, as on Cloudflare
-        for key, value in applied.items():
-            self.send_header(key, value)
+            if re.match(rx, path):
+                for key, value in headers:
+                    self.send_header(key, value)  # appended, as on Cloudflare
         super().end_headers()
 
 

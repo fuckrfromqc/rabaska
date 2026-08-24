@@ -21,8 +21,22 @@
 # Cross-Origin-Embedder-Policy is deliberately absent: it was here for
 # SharedArrayBuffer, which this build does not use, and require-corp only adds
 # ways for the page to fail. Phase 2's decode worker will need it back.
+# Cloudflare applies EVERY matching rule and *appends* repeated headers rather
+# than replacing them. A response carrying two Content-Security-Policy headers
+# is governed by both, and a request must satisfy every policy — so a broad
+# `/*` policy cannot be relaxed for one path by a later rule, it can only ever
+# be narrowed. The `/sw.js` block below used to be written as if it replaced
+# this one; the live origin returned both, the worker inherited
+# `connect-src 'none'` on top of its own `'self'`, and every precache fetch was
+# refused. The app had no offline support in production at any point, silently,
+# while a local server that merged the rules reported it working.
+#
+# So the CSP is not set here. It is set per document, on the only two responses
+# that can carry a policy: the page and the worker. A CSP on a .js, .css or
+# .woff2 response governs nothing — only documents and workers get policies —
+# so nothing is lost by leaving those without one. Everything else in this
+# block is a header that genuinely should apply to every response.
 /*
-  Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; font-src 'self'; connect-src 'none'; manifest-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'
   Strict-Transport-Security: max-age=31536000; includeSubDomains
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Resource-Policy: same-origin
@@ -49,9 +63,20 @@
 # fetch handler), and it answers exactly two postMessage types, neither of which
 # fetches anything.
 #
-# Rules are applied in order and the later, more specific one wins, so this
-# block replaces the CSP above for this path only. Verify that after every
-# deploy — see DEPLOY.md 2.5.
+# The page's own policy, on both URLs that serve it. `./` and `./index.html`
+# are both precached, so both have to carry it: a navigation served from the
+# cache replays the headers the response was stored with.
+#
+# This is the product claim, and it is still verifiable exactly as before:
+#   curl -sI https://rabaska.favreau.xyz/ | grep -i content-security-policy
+/
+  Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; font-src 'self'; connect-src 'none'; manifest-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'
+
+/index.html
+  Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; font-src 'self'; connect-src 'none'; manifest-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'
+
+# This block does NOT replace the policy above, it is added to it — which is
+# why the page CSP no longer matches this path at all. See the note on /* .
 /sw.js
   Cache-Control: no-cache
   Content-Security-Policy: default-src 'none'; script-src 'self'; connect-src 'self'; base-uri 'none'

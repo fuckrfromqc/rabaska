@@ -29,11 +29,24 @@ echo "  sw.js:  ${LIVE_SW:-<none>}"
 echo
 
 echo "=== the two CSPs, which must differ (DEPLOY.md 2.5) ==="
+# The count matters as much as the content. Cloudflare appends repeated headers
+# across matching _headers rules, and a response carrying two policies is
+# governed by both at once — so a second CSP can only narrow the first, never
+# widen it. A /sw.js rule granting connect-src 'self' underneath a /* rule
+# saying 'none' therefore grants nothing, the precache cannot fetch, and the
+# app has no offline support. That shipped, and nothing in the build or the
+# local server could see it, because both merged the rules into one header.
+CSP_DOUBLED=0
 for f in / /sw.js; do
   printf '  %-8s ' "$f"
+  HDRS=$(curl -sSI --max-time 30 "$URL$f" | tr -d '\r' | grep -ci '^content-security-policy')
   curl -sSI --max-time 30 "$URL$f" | tr -d '\r' \
     | grep -i '^content-security-policy' | tr ';' '\n' \
     | grep -iE 'connect-src' | paste -sd ' ' - | sed 's/^/ /'
+  if [ "$HDRS" -ne 1 ]; then
+    echo "    ^ $HDRS Content-Security-Policy headers on $f; exactly one is allowed"
+    CSP_DOUBLED=1
+  fi
   echo
 done
 echo
@@ -48,11 +61,21 @@ for f in / /sw.js /app.js /style.css; do
 done
 echo
 
+RC=0
+if [ "$CSP_DOUBLED" -eq 1 ]; then
+  echo "BROKEN: a document is served more than one CSP. Browsers enforce every"
+  echo "policy on a response, so the effective one is their intersection. If the"
+  echo "worker inherits connect-src 'none' its precache cannot fetch and the app"
+  echo "has no offline support, with no error anywhere in the page."
+  RC=1
+fi
+
 if [ -n "$WANT" ]; then
   if [ "$LIVE_APP" = "$WANT" ] && [ "$LIVE_SW" = "$WANT" ]; then
     echo "OK: the origin serves $WANT"
   else
     echo "STALE: uploaded $WANT but the origin serves app=$LIVE_APP sw=$LIVE_SW"
-    exit 1
+    RC=1
   fi
 fi
+exit $RC
