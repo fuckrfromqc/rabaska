@@ -58,7 +58,7 @@ async function openDb() {
       const d = r.result;
       d.createObjectStore('identity');
       d.createObjectStore('peers');       // id_hint hex -> { pubkey, name, seen }
-      d.createObjectStore('checkpoints'); // session hex -> packets
+      d.createObjectStore('checkpoints'); // CHECKPOINT_KEY -> { session, packets }
     };
     r.onsuccess = () => res(r.result);
     r.onerror = () => rej(r.error);
@@ -345,6 +345,11 @@ function click(rate) {
 
 let state = { role: 'idle', wakeLock: null, stop: false };
 
+// One slot. Only one transfer is ever in flight, and keeping older sessions
+// around only creates more chances to restore the wrong one.
+const CHECKPOINT_KEY = 'active';
+let checkpointTimer = null;
+
 async function beReceiver() {
   const identity = await loadIdentity();
   const session = new Session(identity);
@@ -359,10 +364,18 @@ async function beReceiver() {
   // Resume is free with rateless coding, but only if the checkpoint is actually
   // read back. It was being written and never loaded, which meant a locked
   // phone silently restarted the whole transfer.
-  const saved = await get('checkpoints', 'active');
-  if (saved?.length) {
-    recv.restore(saved.map((a) => new Uint8Array(a)));
-    $('hint').textContent = `Resuming: ${saved.length} symbols already collected.`;
+  //
+  // The session travels with the symbols. Without it, a checkpoint left over
+  // from the previous transfer got mixed into this one: RaptorQ ids are
+  // per-object, so the stale symbols looked live, reassembled into an object of
+  // the right length, and the tag rejected it. The receiver then blamed the
+  // sender for a corruption it had introduced itself. `restore` drops a
+  // checkpoint whose session does not match the beacon, so a stale one now
+  // costs nothing but the bytes it occupied.
+  const saved = await get('checkpoints', CHECKPOINT_KEY);
+  if (saved?.session && saved.packets?.length) {
+    recv.restore(saved.session, saved.packets.map((a) => new Uint8Array(a)));
+    $('hint').textContent = `Resuming: ${saved.packets.length} symbols already collected.`;
   }
 
   // Show the reverse QR immediately. Being a receiver is the resting state:
@@ -562,10 +575,19 @@ async function beReceiver() {
 
   // Rateless coding means resume is free: lock the phone, walk away, come back,
   // keep collecting. There is never a restart.
-  setInterval(async () => {
+  //
+  // `session_id` is null until the beacon arrives, and `checkpoint()` is empty
+  // until then too, so there is nothing to save before the transfer is real.
+  clearInterval(checkpointTimer); // never leave a second writer running
+  checkpointTimer = setInterval(async () => {
     if (state.role !== 'receive') return;
+    const session = recv.session_id;
     const pk = recv.checkpoint();
-    if (pk.length) await put('checkpoints', 'active', pk.map((a) => Array.from(a)));
+    if (!session || !pk.length) return;
+    await put('checkpoints', CHECKPOINT_KEY, {
+      session,
+      packets: pk.map((a) => Array.from(a)),
+    });
   }, 2000);
 }
 
@@ -598,7 +620,14 @@ async function finish(recv, payload) {
   a.download = name;
   a.textContent = `Save ${name}`;
   a.hidden = false;
-  await tx('checkpoints', 'readwrite', (o) => o.delete('active'));
+
+  // Order matters. The writer runs every two seconds off a live `recv` that
+  // still holds every symbol of the delivered transfer, so deleting first and
+  // stopping second leaves the finished checkpoint on disk to be restored into
+  // whatever transfer comes next.
+  clearInterval(checkpointTimer);
+  checkpointTimer = null;
+  await tx('checkpoints', 'readwrite', (o) => o.delete(CHECKPOINT_KEY));
 }
 
 function setProgress(fraction, received, needed) {

@@ -336,8 +336,11 @@ pub struct Receiver {
     beacon: Option<Beacon>,
     key: Option<SessionKey>,
     decoder: Option<Decoder>,
-    /// Symbols seen before the beacon arrived, or before the key was set.
-    pending: Vec<Vec<u8>>,
+    /// Symbols held until the beacon says which session is being received:
+    /// ones that arrived ahead of it, and ones restored from a checkpoint. Each
+    /// carries the session it came from, because a symbol is only meaningful
+    /// inside its own session and there is nothing in the bytes to tell.
+    pending: Vec<([u8; 4], Vec<u8>)>,
     /// Everything accepted, for IndexedDB checkpointing and resume.
     seen: Vec<Vec<u8>>,
     /// RaptorQ PayloadIds already absorbed. The transmitter cycles a finite pool
@@ -409,10 +412,30 @@ impl Receiver {
         self.ids.len()
     }
 
-    /// Feed a checkpoint back in. Safe to call before or after the beacon.
-    /// Duplicates in the restored set are dropped like any other.
-    pub fn restore(&mut self, packets: Vec<Vec<u8>>) {
-        self.pending.extend(packets);
+    /// Feed a checkpoint back in, under the session it was saved for. Safe to
+    /// call before or after the beacon. Duplicates in the restored set are
+    /// dropped like any other, and a checkpoint belonging to some other session
+    /// is dropped whole.
+    ///
+    /// The session is not optional and cannot be inferred. RaptorQ symbol ids
+    /// are per-object, so symbols from a past transfer look exactly like
+    /// symbols from this one; absorbing them reassembles an object of the right
+    /// length that no key opens, and the receiver reports the sender corrupted
+    /// a transfer it corrupted itself.
+    pub fn restore(&mut self, session_id: [u8; 4], packets: Vec<Vec<u8>>) {
+        self.hold(session_id, packets);
+    }
+
+    /// Park symbols under their session until the beacon decides their fate.
+    fn hold(&mut self, sid4: [u8; 4], packets: Vec<Vec<u8>>) {
+        if let Some(b) = &self.beacon {
+            // The session is already known, so there is nothing to wait for:
+            // either they belong here or they never will.
+            if sid4 != b.session_id[0..4] {
+                return;
+            }
+        }
+        self.pending.extend(packets.into_iter().map(|p| (sid4, p)));
     }
 
     /// Feed one decoded optical frame. Errors are per-frame and non-fatal:
@@ -445,7 +468,7 @@ impl Receiver {
                 match &self.beacon {
                     None => {
                         // Symbols before beacon acquisition are kept, not dropped.
-                        self.pending.extend(sf.packets);
+                        self.hold(sf.sid4, sf.packets);
                         Ok(Ingest::Ignored)
                     }
                     Some(b) => {
@@ -461,7 +484,20 @@ impl Receiver {
     }
 
     fn absorb(&mut self, packets: Vec<Vec<u8>>) -> Result<Ingest> {
-        let queued: Vec<Vec<u8>> = self.pending.drain(..).chain(packets).collect();
+        let sid4: [u8; 4] = self
+            .beacon
+            .as_ref()
+            .expect("beacon exists once absorbing")
+            .session_id[0..4]
+            .try_into()
+            .unwrap();
+        let queued: Vec<Vec<u8>> = self
+            .pending
+            .drain(..)
+            .filter(|(s, _)| *s == sid4)
+            .map(|(_, p)| p)
+            .chain(packets)
+            .collect();
         let mut finished: Option<Vec<u8>> = None;
 
         for raw in queued {
@@ -583,6 +619,76 @@ mod tests {
         panic!("did not converge");
     }
 
+    /// Run one transfer to completion and hand back the receiver's checkpoint,
+    /// so a *second* transfer can be started from a stale resume.
+    fn transfer_keeping_checkpoint(payload: &[u8], capacity: usize) -> ([u8; 4], Vec<Vec<u8>>) {
+        let s_eph = KeyPair::generate();
+        let r_eph = KeyPair::generate();
+        let sid = crypto::random_session_id();
+        let ks = crypto::derive_pair(Role::Sender, &s_eph, &r_eph.public(), &sid);
+        let kr = crypto::derive_pair(Role::Receiver, &r_eph, &s_eph.public(), &sid);
+
+        let mut tx = Transmitter::new(&ks, cfg(sid, s_eph.public(), capacity), payload);
+        let mut rx = Receiver::new();
+        let mut key = Some(kr);
+
+        for _ in 0..200_000 {
+            let f = tx.next_frame();
+            match rx.ingest(f.bytes()) {
+                Ok(Ingest::BeaconAcquired) => rx.set_key(key.take().expect("key set once")),
+                Ok(Ingest::Done { plaintext }) => {
+                    assert_eq!(plaintext, payload);
+                    return (sid[0..4].try_into().unwrap(), rx.checkpoint().to_vec());
+                }
+                Ok(_) => {}
+                Err(e) => panic!("rejected: {e}"),
+            }
+        }
+        panic!("did not converge");
+    }
+
+    /// A checkpoint exists so a receiver can resume *the same* transfer after
+    /// the phone locks. Symbols from a different session share the RaptorQ
+    /// symbol-id space but carry unrelated bytes, so absorbing them means the
+    /// decoder reassembles a plausible-length object that no key can open. The
+    /// receiver would blame the sender for a corruption it caused itself, so a
+    /// checkpoint that does not belong to this session must never be absorbed.
+    #[test]
+    fn a_stale_checkpoint_cannot_poison_the_next_transfer() {
+        let (stale_sid, stale) =
+            transfer_keeping_checkpoint(b"the previous transfer, long since delivered", 1050);
+        assert!(
+            !stale.is_empty(),
+            "the first transfer left nothing to poison with"
+        );
+
+        let payload = b"[Interface]\nPrivateKey = aGVsbG8...\nAddress = 10.0.0.2/32\n";
+        let s_eph = KeyPair::generate();
+        let r_eph = KeyPair::generate();
+        let sid = crypto::random_session_id();
+        let ks = crypto::derive_pair(Role::Sender, &s_eph, &r_eph.public(), &sid);
+        let kr = crypto::derive_pair(Role::Receiver, &r_eph, &s_eph.public(), &sid);
+
+        let mut tx = Transmitter::new(&ks, cfg(sid, s_eph.public(), 1050), payload);
+        let mut rx = Receiver::new();
+        rx.restore(stale_sid, stale);
+        let mut key = Some(kr);
+
+        for _ in 0..200_000 {
+            let f = tx.next_frame();
+            match rx.ingest(f.bytes()) {
+                Ok(Ingest::BeaconAcquired) => rx.set_key(key.take().expect("key set once")),
+                Ok(Ingest::Done { plaintext }) => {
+                    assert_eq!(plaintext, payload);
+                    return;
+                }
+                Ok(_) => {}
+                Err(e) => panic!("stale checkpoint poisoned a fresh session: {e}"),
+            }
+        }
+        panic!("did not converge");
+    }
+
     #[test]
     fn small_secret_round_trips() {
         let payload = b"[Interface]\nPrivateKey = aGVsbG8...\nAddress = 10.0.0.2/32\n";
@@ -670,7 +776,7 @@ mod tests {
             &s_eph.public(),
             &sid,
         ));
-        rx2.restore(saved);
+        rx2.restore(sid[0..4].try_into().unwrap(), saved);
         for _ in 0..5_000 {
             let f = tx.next_frame();
             match rx2.ingest(f.bytes()).unwrap() {

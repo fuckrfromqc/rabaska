@@ -26,8 +26,19 @@ import { chromium } from 'playwright';
 // does it with the sender's camera switched OFF at the hardware level, because
 // "the sending device does not need a camera" is the entire claim of that mode
 // and a test that leaves the camera on would not be testing it.
+//
+// MODE=pair,open runs both, back to back, against the SAME two browser profiles
+// with only a reload between them. That is not a convenience for running two
+// tests at once: a device that has already received something is a different
+// device, because it now has an IndexedDB. A single transfer into an empty
+// profile is the one case that cannot catch state carried between transfers,
+// and it was exactly the case this test covered when a finished transfer's
+// checkpoint was restored into the next one and the tag rejected the result.
+// The second crossing is the test.
 
-const MODE = process.env.MODE === 'open' ? 'open' : 'pair';
+const MODES = (process.env.MODE || 'pair')
+  .split(',')
+  .map((m) => (m.trim() === 'open' ? 'open' : 'pair'));
 const A_PORT = Number(process.env.A_PORT || 8095);
 const B_PORT = Number(process.env.B_PORT || 8094);
 // A real file, not a string: a name with an extension, a MIME type, and a body
@@ -35,14 +46,21 @@ const B_PORT = Number(process.env.B_PORT || 8094);
 // anywhere in the path shows up as a mismatch rather than as a file that only
 // looks fine. The transfer completing is not the assertion; arriving as this
 // exact file is.
-const FILE_NAME = 'holiday photo.jpg';
 const FILE_MIME = 'image/jpeg';
-const FILE_BYTES = Buffer.concat([
-  Buffer.from([0xff, 0xd8, 0xff, 0xe0]),                    // JPEG magic
-  Buffer.from(Array.from({ length: 256 }, (_, i) => i)),    // every byte value
-  Buffer.from('rabaska carries a lot in one crossing', 'utf8'),
-  Buffer.from(Array.from({ length: 1024 }, (_, i) => (i * 37) & 0xff)),
-]);
+// Each run carries a DIFFERENT file, so a second transfer that somehow delivers
+// the first one's bytes fails loudly instead of looking like a pass.
+function fixture(run) {
+  return {
+    name: `holiday photo ${run + 1}.jpg`,
+    mime: FILE_MIME,
+    bytes: Buffer.concat([
+      Buffer.from([0xff, 0xd8, 0xff, 0xe0]),                  // JPEG magic
+      Buffer.from(Array.from({ length: 256 }, (_, i) => i)),  // every byte value
+      Buffer.from(`rabaska carries a lot on crossing ${run + 1}`, 'utf8'),
+      Buffer.from(Array.from({ length: 1024 + run * 97 }, (_, i) => (i * 37 + run) & 0xff)),
+    ]),
+  };
+}
 
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM || undefined,
@@ -166,22 +184,66 @@ async function waitFor(page, name, desc, pred, ms) {
   }
 }
 
-let check_open_warning_on_sender = false;
-const check_receiver_warned = (r) => {
-  if (!r.openWarning) {
-    throw new Error('the receiver was NOT told the file arrived unencrypted');
-  }
-  console.log('✓ [A] receiver identified the transfer as unencrypted, unprompted');
-  if (!check_open_warning_on_sender) throw new Error('sender was never warned');
-};
+// Put the sender's camera switch where this mode needs it, whatever an earlier
+// run left it as. The preference is persisted, so a second run inherits it.
+async function setSenderCamera(on) {
+  const now = await B.evaluate(() => document.getElementById('camera-toggle').checked);
+  if (now === on) return;
+  await B.click('.switch');
+  await B.waitForTimeout(1000);
+}
 
-let failed = false;
-try {
+// Between runs the devices are restarted, not rebuilt: same origins, same
+// IndexedDB, same identities, same camera preference. Everything a real second
+// transfer would carry over is carried over.
+async function restart() {
+  aimed = false;
+  // Dwell past the checkpoint writer's 2s tick. A person does not start the
+  // next transfer the instant the last one lands, and what the finished
+  // transfer leaves on disk is the whole subject of the second crossing: with
+  // no dwell the test reloads before the writer can run and proves nothing.
+  await A.waitForTimeout(5000);
+  const left = await A.evaluate(() => new Promise((res) => {
+    const r = indexedDB.open('rabaska', 1);
+    r.onsuccess = () => {
+      const q = r.result.transaction('checkpoints').objectStore('checkpoints').getAllKeys();
+      q.onsuccess = () => res(q.result.map(String));
+      q.onerror = () => res(['<unreadable>']);
+    };
+    r.onerror = () => res(['<unreadable>']);
+  }));
+  console.log(`    [A] checkpoints on disk after delivery: ${JSON.stringify(left)}`);
+  // A delivered transfer has nothing left to resume. Symbols kept past delivery
+  // are not a harmless leftover: they are the input to the next transfer's
+  // decoder, and leaving them there is what made a second crossing fail its tag
+  // and accuse the sender of corrupting it.
+  if (left.length) {
+    throw new Error(`a delivered transfer left ${JSON.stringify(left)} on disk`);
+  }
+  await Promise.all([
+    A.reload({ waitUntil: 'load' }).catch(() => {}),
+    B.reload({ waitUntil: 'load' }).catch(() => {}),
+  ]);
+  await A.waitForTimeout(2500);
+  await B.waitForTimeout(500);
+}
+
+async function runTransfer(MODE, run) {
+  const { name: FILE_NAME, bytes: FILE_BYTES } = fixture(run);
+  let check_open_warning_on_sender = false;
+  const check_receiver_warned = (r) => {
+    if (!r.openWarning) {
+      throw new Error('the receiver was NOT told the file arrived unencrypted');
+    }
+    console.log('✓ [A] receiver identified the transfer as unencrypted, unprompted');
+    if (!check_open_warning_on_sender) throw new Error('sender was never warned');
+  };
+
+  console.log(`\n--- crossing ${run + 1}: ${MODE} ---`);
+  await setSenderCamera(MODE !== 'open');
   if (MODE === 'open') {
     // Off before anything is staged, so the sender never has a camera to fall
     // back on at any point in the flow.
-    await B.click('.switch');
-    await B.waitForTimeout(1000);
     const off = await B.evaluate(() => {
       const t = document.getElementById('camera').srcObject;
       return !t || t.getTracks().every((x) => x.readyState !== 'live');
@@ -294,10 +356,19 @@ try {
   }
   console.log(`✓ type preserved: ${got.type}`);
   console.log(`✓ A offers the file, and saw peer build ${end.peer}`);
-  console.log(`\n=== END TO END (${MODE}): PASS ===`);
+  console.log(`✓ crossing ${run + 1} (${MODE}) delivered intact`);
+}
+
+let failed = false;
+try {
+  for (const [run, MODE] of MODES.entries()) {
+    if (run > 0) await restart();
+    await runTransfer(MODE, run);
+  }
+  console.log(`\n=== END TO END (${MODES.join(' then ')}): PASS ===`);
 } catch (e) {
   failed = true;
-  console.error(`\n=== END TO END (${MODE}): FAIL ===\n` + e.message);
+  console.error(`\n=== END TO END (${MODES.join(' then ')}): FAIL ===\n` + e.message);
 } finally {
   bridging = false;
   await bridge;

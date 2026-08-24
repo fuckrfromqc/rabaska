@@ -32,13 +32,19 @@ on two origins, with each one's camera fed from the other's screen: beacon,
 commitment, reveal, matching SAS on both sides, symbols, AEAD, completion frame,
 and the payload asserted back byte for byte.
 
+`MODE=pair,open` runs both modes back to back against the same two profiles,
+reloading between them. A device that has already received something is a
+different device, because it now has an IndexedDB, and a single transfer into an
+empty profile is the one case that cannot catch state carried between
+transfers.
+
 Still unrun: two real devices, two real cameras, one pointed at the other. A
 synthetic camera feed has no blur, no rolling shutter, no autofocus and no human
 holding it, and those are what the ladder exists for.
 
 ```
-cargo test --release --all                       39 tests
-cargo test -p rabaska-core --features wasm       45 tests
+cargo test --release --all                       55 tests
+cargo test -p rabaska-core --features wasm       61 tests
 cargo run -p rabaska-harness -- modes   all four modes, end to end
 cargo run -p rabaska-harness -- ladder  throughput model
 cargo run -p rabaska-harness -- vectors frozen test vectors
@@ -60,7 +66,7 @@ cargo run -p rabaska-harness -- vectors frozen test vectors
 | `app/` | Shell, service worker, CSP. Runs: boots, decodes, works offline. |
 | `app/` viewfinder | Live camera preview with a decode-state readout, for aiming. |
 | `tools/serve.py` | Local server that applies `_headers`, so the CSP is enforced. |
-| `tools/e2e.mjs` | Two app instances, screen to camera, full PAIR flow, byte-exact. |
+| `tools/e2e.mjs` | Two app instances, screen to camera, byte-exact. Both modes, and two crossings on one profile. |
 | `tools/layout.mjs` | Phone layout invariants, on both the svh and no-svh branches. |
 | `tools/update.mjs` | The service worker update flow, across two real builds. |
 | `build.sh` | wasm-pack, base64 inlining, build stamping, precache manifest. |

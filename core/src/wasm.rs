@@ -247,11 +247,24 @@ impl Receive {
         Ok(())
     }
 
-    /// Restore checkpointed symbols. Lock the phone, walk away, come back, keep
-    /// collecting. Rateless coding means there is no restart.
-    pub fn restore(&mut self, packets: Vec<js_sys::Uint8Array>) {
+    /// Restore checkpointed symbols saved under `session_hex`. Lock the phone,
+    /// walk away, come back, keep collecting. Rateless coding means there is no
+    /// restart.
+    ///
+    /// The session is required, and a checkpoint from any other one is dropped
+    /// whole rather than mixed in. Symbol ids are per-object, so stale symbols
+    /// are indistinguishable from live ones by inspection: absorbing them
+    /// reassembles garbage of the right length, and the receiver reports a
+    /// corruption it caused itself.
+    pub fn restore(
+        &mut self,
+        session_hex: &str,
+        packets: Vec<js_sys::Uint8Array>,
+    ) -> Result<(), JsError> {
+        let sid = decode_sid4(session_hex)?;
         let v: Vec<Vec<u8>> = packets.iter().map(|a| a.to_vec()).collect();
-        self.rx.restore(v);
+        self.rx.restore(sid, v);
+        Ok(())
     }
 
     /// Symbols collected so far, for checkpointing to IndexedDB.
@@ -381,6 +394,30 @@ impl Receive {
             .beacon()
             .map(|b| format!("{:?}", b.mode).to_lowercase())
     }
+
+    /// The session being received, as hex, or null before the beacon arrives.
+    /// This is the key a checkpoint has to be stored under, so that resuming
+    /// can tell "the same transfer, later" from "a different transfer".
+    #[wasm_bindgen(getter)]
+    pub fn session_id(&self) -> Option<String> {
+        self.rx.beacon().map(|b| hex4(&b.session_id))
+    }
+}
+
+fn hex4(sid: &[u8; 8]) -> String {
+    sid[0..4].iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn decode_sid4(hex: &str) -> Result<[u8; 4], JsError> {
+    let bad = || JsError::new("session id must be 8 hex characters");
+    if hex.len() != 8 {
+        return Err(bad());
+    }
+    let mut out = [0u8; 4];
+    for (i, b) in out.iter_mut().enumerate() {
+        *b = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).map_err(|_| bad())?;
+    }
+    Ok(out)
 }
 
 // ---------------------------------------------------------------------------
