@@ -791,18 +791,40 @@ function setOfflineChip(state) {
 
 async function trackOfflineReadiness(reg) {
   navigator.serviceWorker.addEventListener('message', (e) => {
-    if (e.data?.precacheFailed) console.error('rabaska: precache failed:', e.data.precacheFailed);
+    if (e.data?.precacheFailed) {
+      // Positive evidence of failure, straight from the worker that failed.
+      console.error('rabaska: precache failed:', e.data.precacheFailed);
+      setOfflineChip('none');
+    }
   });
+
   // Polled rather than chased through statechange events. The worker moves
   // installing -> installed -> activating -> activated across three different
   // registration slots, and tracking that correctly is far more code than one
   // chip is worth.
-  const deadline = performance.now() + 10000;
-  while (performance.now() < deadline) {
+  //
+  // No deadline, though. This used to give up after ten seconds and say "online
+  // only" for the rest of the session — including when the worker went on to
+  // install fine a moment later, which on a 1.4 MB precache over a weak
+  // cellular connection is the ordinary case rather than the edge one. A clock
+  // running out is not evidence of anything, and the chip claiming the app has
+  // no offline support when it is seconds away from having it is the same lie
+  // as the label it replaced, pointing the other way.
+  //
+  // So it decides on state. Active means cached. No worker in any slot means
+  // the install was rejected and the registration discarded, which is what a
+  // failing precache looks like from here. Anything else means still working,
+  // and "checking" is the honest answer for as long as that is true — until it
+  // resolves, the app genuinely does not work offline yet.
+  let empty = 0;
+  for (;;) {
     if (reg.active) return setOfflineChip('ready');
+    // Right after register() resolves every slot can be briefly empty before
+    // the browser fills `installing`, so require it to persist.
+    empty = reg.installing || reg.waiting ? 0 : empty + 1;
+    if (empty >= 8) return setOfflineChip('none');
     await new Promise((r) => setTimeout(r, 250));
   }
-  setOfflineChip('none');
 }
 
 // No fetch anywhere in this file. The CSP sets connect-src 'none', so a fetch
