@@ -73,6 +73,26 @@
     <button id="sas-confirm" hidden>They match, send it</button>
   </section>
 
+  <!-- Shown once a payload is staged. Two ways to send, and the difference
+       between them is not a preference: one is private and one is not, so the
+       unencrypted option states what it costs rather than being the quiet
+       default that happens to work on more hardware. -->
+  <section id="send-mode" hidden>
+    <h2>How to send</h2>
+    <button id="send-encrypted">Encrypted</button>
+    <p class="note">Both devices need a camera. You compare five digits before
+      anything leaves this screen.</p>
+    <button id="send-open" class="danger">Unencrypted</button>
+    <p class="note">No camera needed on this device, for a locked machine that
+      only has a screen. <b>Anyone who can see this screen, or photograph it,
+      can read the file.</b></p>
+    <button id="send-cancel" class="quiet">Cancel</button>
+  </section>
+
+  <p id="open-warning" class="warnbar" hidden>
+    Unencrypted transfer. Anyone who can see this screen can read it.
+  </p>
+
   <div class="actions">
     <button id="paste">Paste text or a key</button>
     <label class="btn" for="file">Choose a file</label>

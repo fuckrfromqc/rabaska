@@ -450,9 +450,15 @@ async function beReceiver() {
       // version; 0x01 is PAIR_REQ. Checking it here rather than handing it to
       // ingest() keeps the receiver from logging an error for a frame that is
       // simply meant for the other role.
-      if (staged && frame.length > 3 && frame[3] === 0x01) {
+      // sendChoice, not just `staged`: a staged payload used to arm this on its
+      // own, so with a camera live and the peer's code in view the encrypted
+      // send began the instant a file was picked — before the person had said
+      // which way they wanted to send it. Having something to send is not the
+      // same as having chosen how.
+      if (staged && sendChoice === 'encrypted' && frame.length > 3 && frame[3] === 0x01) {
         state.stop = true;
         closeCamera(stream);
+        sendChoice = null;
         $('scan-to-send').hidden = true;
         setTimeout(async () => {
           state.stop = false;
@@ -576,6 +582,10 @@ async function finish(recv, payload) {
   // Unwrap AFTER complete_frame, never before: the sender's expected hash is
   // over the whole payload it handed to the pipeline, envelope included, so
   // verification has to see the same bytes the sender did.
+  // The receiver never chose the mode and cannot infer it from the file, so a
+  // payload that crossed with no confidentiality has to say so on arrival.
+  if (recv.mode === 'open') $('open-warning').hidden = false;
+
   const p = payload_unwrap(payload);
   const name = p.name || 'rabaska-payload.bin';
 
@@ -610,7 +620,15 @@ async function beSender(payload, pairReqBytes) {
   const bh = currentBuildHash();
 
   const cap = qr_capacity(LADDER[0].version, LADDER[0].ecc);
-  const send = Send.reply(pairReqBytes, payload, identity, null, bh, cap);
+
+  // A null pair_req means nothing was scanned, because nothing could be: this
+  // is the camera-less path. Send.open keys from material it puts on screen in
+  // the clear, so there is no handshake, no SAS, and no confidentiality.
+  const unencrypted = !pairReqBytes;
+  const send = unencrypted
+    ? Send.open(payload, bh, cap)
+    : Send.reply(pairReqBytes, payload, identity, null, bh, cap);
+  if (unencrypted) $('open-warning').hidden = false;
 
   if (send.sas) {
     $('sas').textContent = send.sas;
@@ -684,6 +702,16 @@ async function beSender(payload, pairReqBytes) {
 
     // Delivery verification. One camera session at a time: this scan begins
     // only after the reveal scan has released its stream.
+    //
+    // It needs a camera, which the unencrypted path may well not have. Silence
+    // would read as success, so say plainly that delivery is unknown rather
+    // than letting the last hint on screen imply it landed.
+    if (!cameraOn) {
+      $('hint').textContent =
+        'Sent. Keep this on screen until the other device says it is done — '
+        + 'without a camera here, delivery cannot be confirmed.';
+      return;
+    }
     const complete = await scanOneFrame(0x04);
     if (!complete) return;
     state.stop = true;
@@ -804,6 +832,43 @@ async function main() {
   $('own-build').textContent = hex(currentBuildHash());
   $('symbol-size').textContent = default_symbol_size();
 
+  $('send-encrypted').onclick = () => {
+    if (!staged) return;
+    closeSendMode();
+    if (!cameraOn) {
+      $('hint').textContent =
+        'Encrypted sending needs this camera to read the other device\'s code. '
+        + 'Turn the camera on, or send unencrypted.';
+      $('send-mode').hidden = false;
+      return;
+    }
+    // Arms the receive loop: the next PAIR_REQ it decodes now flips this device
+    // to sender.
+    sendChoice = 'encrypted';
+    $('scan-to-send').hidden = false;
+    $('hint').textContent = "Point this device at the other device's code.";
+  };
+
+  $('send-open').onclick = async () => {
+    if (!staged) return;
+    closeSendMode();
+    // Nothing to scan, so hand the receive loop's camera back before starting:
+    // the display is the only surface this path uses.
+    state.stop = true;
+    receiver?.stopCamera();
+    const payload = staged;
+    clearStaged();
+    setTimeout(async () => {
+      state.stop = false;
+      await beSender(payload, null);
+    }, 0);
+  };
+
+  $('send-cancel').onclick = () => {
+    clearStaged();
+    $('hint').textContent = 'Cancelled.';
+  };
+
   // Read before beReceiver, so a camera left off in an earlier visit never
   // opens at all rather than opening and being shut a moment later.
   cameraOn = loadCameraPref();
@@ -917,17 +982,36 @@ async function main() {
 }
 
 let staged = null;
+// null until the person picks a way to send. Only 'encrypted' arms the receive
+// loop's flip to sender.
+let sendChoice = null;
+
+// Hides the choice and everything that belongs to it. Called on cancel, and
+// again once a mode has been picked.
+function closeSendMode() {
+  $('send-mode').hidden = true;
+  $('scan-to-send').hidden = true;
+}
+
+function clearStaged() {
+  staged = null;
+  sendChoice = null;
+  closeSendMode();
+}
+
 function stageSend(bytes, name, mime) {
   // The name and type travel inside the plaintext, so they are encrypted and
   // authenticated like the body. A filename is often the most revealing part of
   // a transfer; it does not go out in the clear.
   staged = payload_wrap(bytes, name || '', mime || '');
+  sendChoice = null;
   // Report the size of the file, not of the envelope around it: the number
   // should be the one the user recognises from their own filesystem.
-  $('hint').textContent = cameraOn
-    ? `${name || 'Payload'} — ${bytes.length} bytes ready. Scan the other device's code.`
-    : `${name || 'Payload'} — ${bytes.length} bytes ready. Turn the camera on to scan.`;
-  $('scan-to-send').hidden = false;
+  $('hint').textContent = `${name || 'Payload'} — ${bytes.length} bytes ready.`;
+  // The choice, rather than a default: which one is even possible depends on
+  // the hardware, and which one is appropriate depends on the room.
+  $('send-mode').hidden = false;
+  $('scan-to-send').hidden = true;
 }
 
 main().catch((e) => {

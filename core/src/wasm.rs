@@ -514,6 +514,45 @@ impl Send {
         })
     }
 
+    /// Start an unencrypted transfer. Nothing to scan, no camera, no identity.
+    ///
+    /// The key comes from the session id and the sender's ephemeral public key,
+    /// and both of those go out on screen in the clear. So the receiver needs no
+    /// handshake to derive it — and neither does anyone else who can see the
+    /// screen. This mode has no confidentiality. The domain string
+    /// `rabaska/v2/open/no-confidentiality` says so, and the UI has to say so
+    /// too, at the moment of choosing and for as long as it is transmitting.
+    ///
+    /// It earns its place because a locked-down machine with a screen and no
+    /// camera can still hand a file to a phone, and because labelling that
+    /// honestly is better than either pretending it is private or refusing to
+    /// carry it at all. What it still provides is integrity: the payload is
+    /// AEAD-sealed, so a receiver either gets exactly what was sent or gets a
+    /// tag failure.
+    pub fn open(payload: &[u8], build_hash: &[u8], frame_capacity: usize) -> Send {
+        let eph = KeyPair::generate();
+        let sid = crypto::random_session_id();
+        let key = crypto::derive_open(&sid, &eph.public());
+        Send {
+            tx: Transmitter::new(
+                &key,
+                // sender_auth is false: there is no identity in this mode, so
+                // there is nothing for the receiver to authenticate the sender by.
+                cfg(
+                    Mode::Open,
+                    sid,
+                    eph.public(),
+                    build_hash,
+                    frame_capacity,
+                    false,
+                ),
+                payload,
+            ),
+            sas: None,
+            pending: None,
+        }
+    }
+
     /// Next frame to display. Infinite: rateless coding means there is no end of
     /// transmission, so the loop runs until the human stops it.
     ///

@@ -421,6 +421,61 @@ pub fn derive_for_mode(
 mod tests {
     use super::*;
 
+    /// The camera-less sender path, and the only mode with no confidentiality.
+    ///
+    /// Both halves of this matter. That the receiver can key from nothing but
+    /// what arrived on screen is what lets a machine with no camera send at
+    /// all. That anyone watching the same screen can do exactly the same is why
+    /// the UI must never present it as private.
+    #[test]
+    fn open_keys_from_public_material_and_so_can_anyone() {
+        let s_eph = KeyPair::from_bytes([0x77; 32]);
+        let r_eph = KeyPair::from_bytes([0x88; 32]);
+        let sid: [u8; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
+
+        let sender = derive_for_mode(
+            Mode::Open,
+            Role::Sender,
+            &s_eph,
+            None,
+            &Peer {
+                eph_pub: r_eph.public(),
+                id_pub: None,
+            },
+            &sid,
+        )
+        .expect("sender derives");
+
+        let receiver = derive_for_mode(
+            Mode::Open,
+            Role::Receiver,
+            &r_eph,
+            None,
+            &Peer {
+                eph_pub: s_eph.public(),
+                id_pub: None,
+            },
+            &sid,
+        )
+        .expect("receiver derives");
+
+        assert_eq!(
+            sender.as_bytes(),
+            receiver.as_bytes(),
+            "an OPEN receiver must key from the beacon alone, with no handshake"
+        );
+
+        // Not an attack. The session id and the sender's ephemeral public key
+        // are both transmitted in the clear, so a bystander derives the same
+        // key by reading the screen. If this assertion ever fails the mode has
+        // changed meaning and the copy in the UI has become a lie.
+        assert_eq!(
+            derive_open(&sid, &s_eph.public()).as_bytes(),
+            sender.as_bytes(),
+            "OPEN offers no confidentiality and the UI says so"
+        );
+    }
+
     #[test]
     fn pair_agrees() {
         let s = KeyPair::generate();

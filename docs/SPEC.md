@@ -346,3 +346,29 @@ authenticated, but a hostile peer is the threat model: names are reduced to a
 bare filename with no path, no control characters and a bounded length, and
 MIME types are allow-listed to those that cannot script, because the body
 becomes a `blob:` URL on the origin that stores the identity key.
+
+## Choosing a mode in the app
+
+The shell offers two of the four, because those are the two a person can pick
+without out-of-band setup:
+
+**Encrypted** is `PAIR` on a first meeting and `SESSION` once identities are
+stored. Both devices need a camera: the receiver shows a reverse QR, the sender
+scans it, and the five-digit SAS is compared before any payload symbol is
+displayed.
+
+**Unencrypted** is `OPEN`. Nothing is scanned and the sending device needs no
+camera, which is the point — a locked machine with a screen can still hand a
+file to a phone. The key derives from `rabaska/v2/open/no-confidentiality` over
+the session id and the sender's ephemeral public key, both transmitted in the
+clear. Anyone who can see or photograph the screen can decrypt the payload.
+
+That is not a weakness to be mitigated, it is the mode, and the app treats it
+as a labelling problem rather than a security one: stated on the button that
+selects it, held on screen for the whole transfer, and shown on the receiver
+when the file arrives — the receiver never chose the mode and cannot tell from
+the bytes.
+
+`SEAL` is reachable in `core` but not offered in the shell, because it needs
+the receiver's identity key carried out of band and there is nowhere yet to put
+one.

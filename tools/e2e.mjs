@@ -21,6 +21,13 @@
 // still needs two phones.
 import { chromium } from 'playwright';
 
+// MODE=pair (default) drives the encrypted handshake: both cameras, the nonce
+// commitment, five matching digits. MODE=open drives the camera-less path, and
+// does it with the sender's camera switched OFF at the hardware level, because
+// "the sending device does not need a camera" is the entire claim of that mode
+// and a test that leaves the camera on would not be testing it.
+
+const MODE = process.env.MODE === 'open' ? 'open' : 'pair';
 const A_PORT = Number(process.env.A_PORT || 8095);
 const B_PORT = Number(process.env.B_PORT || 8094);
 // A real file, not a string: a name with an extension, a MIME type, and a body
@@ -132,6 +139,8 @@ const state = (p) => p.evaluate(() => ({
   sasVisible: !document.getElementById('sas-panel').hidden,
   confirmVisible: !document.getElementById('sas-confirm').hidden,
   count: document.getElementById('count').textContent,
+  openWarning: !document.getElementById('open-warning').hidden,
+  sendPanel: !document.getElementById('send-mode').hidden,
   // The viewfinder's own readout, which separates "saw nothing" from "decoded
   // frames but the protocol did not advance" without any extra instrumentation.
   word: document.getElementById('sight-word').textContent,
@@ -157,32 +166,83 @@ async function waitFor(page, name, desc, pred, ms) {
   }
 }
 
+let check_open_warning_on_sender = false;
+const check_receiver_warned = (r) => {
+  if (!r.openWarning) {
+    throw new Error('the receiver was NOT told the file arrived unencrypted');
+  }
+  console.log('✓ [A] receiver is told the file arrived unencrypted');
+  if (!check_open_warning_on_sender) throw new Error('sender was never warned');
+};
+
 let failed = false;
 try {
+  if (MODE === 'open') {
+    // Off before anything is staged, so the sender never has a camera to fall
+    // back on at any point in the flow.
+    await B.click('.switch');
+    await B.waitForTimeout(1000);
+    const off = await B.evaluate(() => {
+      const t = document.getElementById('camera').srcObject;
+      return !t || t.getTracks().every((x) => x.readyState !== 'live');
+    });
+    if (!off) throw new Error("the sender's camera is still live; this proves nothing");
+    console.log('✓ [B] camera switched off at the hardware level');
+  }
+
+  // Aimed BEFORE staging on purpose. With a live camera and the peer's code
+  // already in view, staging alone used to start an encrypted send outright,
+  // so the choice below was never actually offered. Pointing them at each
+  // other first is what makes the next assertion mean anything.
+  aimed = true;
+
   await B.setInputFiles('#file', {
     name: FILE_NAME, mimeType: FILE_MIME, buffer: FILE_BYTES,
   });
   await waitFor(B, 'B', 'file staged', (s) => s.hint.includes('bytes ready'), 5000);
 
-  aimed = true; // the two devices are now pointed at each other
-  await waitFor(B, 'B', "scanned A's PAIR_REQ, flipped to sender",
-    (s) => /Point this device|About/.test(s.hint), 30000);
+  await B.waitForTimeout(3000);
+  const afterStaging = await state(B);
+  // The hint, not the panel: flipping to sender does not hide the panel, so a
+  // visible panel is not evidence that nothing started. beSender overwrites
+  // the hint immediately, and that is what a bypass actually looks like.
+  if (!afterStaging.sendPanel || !afterStaging.hint.includes('bytes ready')) {
+    throw new Error('staging started a send on its own: '
+      + `panel=${afterStaging.sendPanel} hint=${JSON.stringify(afterStaging.hint)}`);
+  }
+  console.log('✓ [B] staging offers the choice and starts nothing by itself');
 
-  const a = await waitFor(A, 'A', 'beacon acquired, SAS and reveal shown',
-    (s) => s.sasVisible && s.sas.length > 0, 30000);
-  const b = await waitFor(B, 'B', 'reveal scanned, commitment opened',
-    (s) => s.sasVisible && s.confirmVisible, 30000);
+  if (MODE === 'open') {
+    await B.click('#send-open');
+    await waitFor(B, 'B', 'transmitting with no scan and no camera',
+      (s) => s.openWarning === true, 20000);
+    check_open_warning_on_sender = true;
+  } else {
+    await B.click('#send-encrypted');
+    await waitFor(B, 'B', "scanned A's PAIR_REQ, flipped to sender",
+      (s) => /Point this device|About/.test(s.hint), 30000);
 
-  console.log(`    SAS on A: ${a.sas}    SAS on B: ${b.sas}`);
-  if (a.sas !== b.sas) throw new Error('SAS MISMATCH — the handshake is broken');
-  console.log('✓ SAS matches on both screens');
+    const a = await waitFor(A, 'A', 'beacon acquired, SAS and reveal shown',
+      (s) => s.sasVisible && s.sas.length > 0, 30000);
+    const b = await waitFor(B, 'B', 'reveal scanned, commitment opened',
+      (s) => s.sasVisible && s.confirmVisible, 30000);
 
-  await B.click('#sas-confirm');
+    console.log(`    SAS on A: ${a.sas}    SAS on B: ${b.sas}`);
+    if (a.sas !== b.sas) throw new Error('SAS MISMATCH — the handshake is broken');
+    console.log('✓ SAS matches on both screens');
+
+    await B.click('#sas-confirm');
+  }
   await waitFor(A, 'A', 'symbols landing', (s) => /\d+ \/ \d+|verifying/.test(s.count), 30000);
   await waitFor(A, 'A', 'reassembled, authenticated, delivered',
     (s) => s.hint.includes('Verified. Delivered.'), 60000);
-  await waitFor(B, 'B', 'completion frame scanned, delivery verified',
-    (s) => s.hint.includes('Verified delivered'), 30000);
+  if (MODE === 'open') {
+    const r = await state(A);
+    check_receiver_warned(r);
+  } else {
+    await waitFor(B, 'B', 'completion frame scanned, delivery verified',
+      (s) => s.hint.includes('Verified delivered'), 30000);
+  }
 
   const end = await state(A);
   if (!end.download) throw new Error('A never offered the payload for download');
@@ -223,10 +283,10 @@ try {
   }
   console.log(`✓ type preserved: ${got.type}`);
   console.log(`✓ A offers the file, and saw peer build ${end.peer}`);
-  console.log('\n=== END TO END: PASS ===');
+  console.log(`\n=== END TO END (${MODE}): PASS ===`);
 } catch (e) {
   failed = true;
-  console.error('\n=== END TO END: FAIL ===\n' + e.message);
+  console.error(`\n=== END TO END (${MODE}): FAIL ===\n` + e.message);
 } finally {
   bridging = false;
   await bridge;

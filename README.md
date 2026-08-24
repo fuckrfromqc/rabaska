@@ -75,9 +75,19 @@ cargo run -p rabaska-harness -- vectors frozen test vectors
 | `SEAL` | 0 | receiver's identity key, out of band | none |
 | `OPEN` | 0 | nothing | none, and no confidentiality |
 
-`SEAL` is the camera-less sender path: a locked-down laptop, a headless box, an
-air-gapped machine. Screen means send, camera means receive, and a device with
-only a screen can send forever.
+`SEAL` is the camera-less sender path when the receiver's identity key is
+already known: a locked-down laptop, a headless box, an air-gapped machine.
+Screen means send, camera means receive, and a device with only a screen can
+send forever.
+
+`OPEN` is the camera-less path when nothing is known at all, and the app offers
+it as **Unencrypted**. Both sides key from the session id and the sender's
+ephemeral public key, which are on screen in the clear — so the receiver needs
+no handshake, and neither does anyone else watching. It buys the locked machine
+with no camera; it costs confidentiality, and the UI says so at the moment of
+choosing, for as long as it transmits, and again on the receiver when the file
+lands. Integrity survives: the payload is still AEAD-sealed, so a receiver gets
+exactly what was sent or a tag failure.
 
 ## v1 was withdrawn: the SAS was grindable
 
