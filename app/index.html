@@ -49,6 +49,16 @@
         <span class="sight-chip"><span class="dot"></span><b id="sight-word">off</b></span>
       </figcaption>
     </figure>
+
+    <!-- The camera is hardware, and hardware that runs for the whole session
+         because the app might want it is a decision the person holding the
+         phone should get to make. Off stops the stream; it does not merely
+         hide the preview. -->
+    <label class="switch" for="camera-toggle">
+      <input type="checkbox" id="camera-toggle" role="switch" checked>
+      <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+      <span class="switch-text">Use camera</span>
+    </label>
   </div>
 
   <p id="hint">Starting…</p>

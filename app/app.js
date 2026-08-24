@@ -282,6 +282,41 @@ function tooDark(luma) {
 }
 
 // ---------------------------------------------------------------------------
+// the camera switch
+// ---------------------------------------------------------------------------
+
+// The camera is hardware. Running it for a whole session because the app might
+// want it is a decision the person holding the phone should get to make, so it
+// is a switch rather than an assumption. Off ends the track: the indicator
+// light goes out and the decode loop stands down. It is not a hidden preview.
+//
+// On by default, because being a receiver is the resting state and a receiver
+// with no camera receives nothing. The choice is remembered, since a preference
+// that resets every visit is not one.
+const CAMERA_PREF = 'rabaska:camera';
+let cameraOn = true;
+
+// Set once beReceiver has built its loop, so the switch can stop and start the
+// stream without disturbing the Receive that owns the symbols collected so far.
+let receiver = null;
+
+function loadCameraPref() {
+  try {
+    return localStorage.getItem(CAMERA_PREF) !== 'off';
+  } catch {
+    return true; // storage denied or a private window: the default stands
+  }
+}
+
+function saveCameraPref(on) {
+  try {
+    localStorage.setItem(CAMERA_PREF, on ? 'on' : 'off');
+  } catch {
+    // Not worth surfacing. The switch still holds for this session.
+  }
+}
+
+// ---------------------------------------------------------------------------
 // audio feedback
 // ---------------------------------------------------------------------------
 
@@ -335,10 +370,9 @@ async function beReceiver() {
   // sender instead.
   paint($('display'), render_qr(pairReqBytes, BEACON_ECC, 6));
 
-  const { stream, video } = await openCamera({
-    facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 },
-  });
-  await takeWakeLock();
+  // The element never changes; only the stream attached to it does.
+  const video = $('camera');
+  let stream = null;
 
   const cv = document.createElement('canvas');
   const ctx = cv.getContext('2d', { alpha: false, willReadFrequently: true });
@@ -350,13 +384,14 @@ async function beReceiver() {
   // the resting state into a permanent error message.
   let acquired = false;
   const RESTING = 'Point the sending device at this code';
+  const CAMERA_OFF = 'Camera off. Turn it on to receive.';
   let currentHint = null;
   const setHint = (t) => {
     if (t === currentHint) return;      // avoid rewriting the DOM every frame
     currentHint = t;
     $('hint').textContent = t;
   };
-  setHint(RESTING);
+  setHint(cameraOn ? RESTING : CAMERA_OFF);
 
   // Re-arming lives in one place because forgetting it anywhere is not a
   // dropped frame, it is a receiver that never hears again.
@@ -366,7 +401,10 @@ async function beReceiver() {
   // that skips the re-arm at the bottom and ends reception permanently, in
   // silence. Catching it here costs one frame instead of the session.
   const schedule = () => {
-    if (state.stop) return;
+    // cameraOn as well as state.stop: a callback armed before the switch went
+    // off still fires once afterwards, and processing that last dead frame
+    // relabels the viewfinder from "off" to whatever a black image looks like.
+    if (state.stop || !cameraOn) return;
     const run = () => onFrame().catch((e) => {
       console.warn('rabaska: frame dropped:', e.message);
       schedule();
@@ -376,7 +414,7 @@ async function beReceiver() {
   };
 
   const onFrame = async () => {
-    if (state.stop) return;
+    if (state.stop || !cameraOn) return;
 
     // A camera reports zero dimensions more often than it looks: before
     // metadata arrives, while the stream reconfigures, and on the way back from
@@ -482,7 +520,39 @@ async function beReceiver() {
     schedule();
   };
 
-  schedule();
+  // Stopping and starting the camera must leave `recv` alone. A transfer in
+  // progress keeps every symbol already collected, so switching off and back on
+  // resumes rather than restarts; only the stream and the frame loop stop.
+  //
+  // Liveness is read from the tracks, not from `stream` being non-null. Other
+  // paths end this stream without telling us — finish() does, and so does the
+  // flip to sender — and a stale handle would make the switch look dead.
+  const streaming = () =>
+    !!stream && stream.getTracks().some((t) => t.readyState === 'live');
+
+  const startCamera = async () => {
+    // Never while sending: that role drives the camera itself, one scan at a
+    // time, and a second consumer would fight it for the device.
+    if (streaming() || state.stop || state.role !== 'receive' || !cameraOn) return;
+    ({ stream } = await openCamera({
+      facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 },
+    }));
+    await takeWakeLock();
+    setHint(acquired ? 'Receiving. Hold steady.' : RESTING);
+    schedule();
+  };
+
+  const stopCamera = () => {
+    closeCamera(stream);
+    stream = null;
+    setHint(CAMERA_OFF);
+  };
+
+  receiver = { startCamera, stopCamera };
+
+  // Before the first start, so startCamera's own role guard passes.
+  state.role = 'receive';
+  if (cameraOn) await startCamera();
 
   // Rateless coding means resume is free: lock the phone, walk away, come back,
   // keep collecting. There is never a restart.
@@ -491,8 +561,6 @@ async function beReceiver() {
     const pk = recv.checkpoint();
     if (pk.length) await put('checkpoints', 'active', pk.map((a) => Array.from(a)));
   }, 2000);
-
-  state.role = 'receive';
 }
 
 async function finish(recv, payload) {
@@ -633,6 +701,7 @@ async function beSender(payload, pairReqBytes) {
 // Open the camera just long enough to catch one frame of a given type, then
 // close it. Used for the REVEAL and COMPLETE scans on the sending device.
 async function scanOneFrame(wantType) {
+  if (!cameraOn) return null;
   const { stream, video } = await openCamera({
     facingMode: 'environment', width: { ideal: 1920 },
   });
@@ -642,7 +711,7 @@ async function scanOneFrame(wantType) {
   try {
     for (;;) {
       await new Promise((r) => setTimeout(r, 1000 / 15));
-      if (state.stop) return null;
+      if (state.stop || !cameraOn) return null;
       cv.width = video.videoWidth; cv.height = video.videoHeight;
       if (!cv.width) continue;
       ctx.drawImage(video, 0, 0);
@@ -734,6 +803,30 @@ async function main() {
 
   $('own-build').textContent = hex(currentBuildHash());
   $('symbol-size').textContent = default_symbol_size();
+
+  // Read before beReceiver, so a camera left off in an earlier visit never
+  // opens at all rather than opening and being shut a moment later.
+  cameraOn = loadCameraPref();
+  const toggle = $('camera-toggle');
+  toggle.checked = cameraOn;
+  toggle.onchange = async () => {
+    cameraOn = toggle.checked;
+    saveCameraPref(cameraOn);
+    if (!cameraOn) {
+      receiver?.stopCamera();
+      return;
+    }
+    try {
+      await receiver?.startCamera();
+    } catch (e) {
+      // Denied or unavailable. Put the switch back rather than leaving it on
+      // over a camera that is not running.
+      cameraOn = false;
+      toggle.checked = false;
+      saveCameraPref(false);
+      $('hint').textContent = `Camera unavailable: ${e.message}`;
+    }
+  };
 
   // One tap on the preview resizes it, and after that tap it stops resizing
   // itself. A control that keeps moving after you have positioned it is worse
@@ -831,8 +924,9 @@ function stageSend(bytes, name, mime) {
   staged = payload_wrap(bytes, name || '', mime || '');
   // Report the size of the file, not of the envelope around it: the number
   // should be the one the user recognises from their own filesystem.
-  $('hint').textContent =
-    `${name || 'Payload'} — ${bytes.length} bytes ready. Scan the other device's code.`;
+  $('hint').textContent = cameraOn
+    ? `${name || 'Payload'} — ${bytes.length} bytes ready. Scan the other device's code.`
+    : `${name || 'Payload'} — ${bytes.length} bytes ready. Turn the camera on to scan.`;
   $('scan-to-send').hidden = false;
 }
 

@@ -62,6 +62,7 @@ cargo run -p rabaska-harness -- vectors frozen test vectors
 | `tools/serve.py` | Local server that applies `_headers`, so the CSP is enforced. |
 | `tools/e2e.mjs` | Two app instances, screen to camera, full PAIR flow, byte-exact. |
 | `tools/layout.mjs` | Phone layout invariants, on both the svh and no-svh branches. |
+| `tools/update.mjs` | The service worker update flow, across two real builds. |
 | `build.sh` | wasm-pack, base64 inlining, build stamping, precache manifest. |
 | `codec/` | Not started. Phase 2. |
 

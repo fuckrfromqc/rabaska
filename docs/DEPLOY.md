@@ -77,6 +77,21 @@ custom-property declarations silently shipped a full-bleed camera preview to
 every browser without `svh`, and a headless Chromium screenshot looked perfect
 because Chromium takes the other branch.
 
+And the update flow, which needs two builds because that is what it is about:
+
+```bash
+./build.sh && cp -r dist /tmp/rabaska-old
+# change anything the build hash covers
+./build.sh && cp -r dist /tmp/rabaska-new
+node tools/update.mjs /tmp/rabaska-old /tmp/rabaska-new
+```
+
+A first visit must offer no update, a genuinely new build must be parked and
+offered once installed, and activating it must land on the new build rather
+than serving the old one back out of the old worker's cache. It spawns its own
+server through `tools/serve.py`, so `sw.js` arrives with `Cache-Control:
+no-cache` and the browser will actually look for a replacement.
+
 **Do not use `python3 -m http.server` for this.** It serves none of the headers
 in `_headers`, so the CSP that governs production is simply absent and the app
 you are looking at is not the app you deploy. That gap is not theoretical. Under
