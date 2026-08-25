@@ -70,6 +70,7 @@ cargo run -p rabaska-harness -- vectors frozen test vectors
 | `tools/layout.mjs` | Phone layout invariants, on both the svh and no-svh branches. |
 | `tools/update.mjs` | The service worker update flow, across two real builds. |
 | `tools/skew.mjs` | A shell and a wasm module from different builds, both directions. |
+| `tools/rollover.mjs` | Whether a deploy actually reaches a device that has already loaded the app. |
 | `build.sh` | wasm-pack, base64 inlining, build stamping, precache manifest. |
 | `codec/` | Not started. Phase 2. |
 

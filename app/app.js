@@ -1018,8 +1018,21 @@ async function main() {
     sightSize(sight.size === 'align' ? 'glance' : 'align', true);
   };
 
-  if ('serviceWorker' in navigator) {
-    const reg = await navigator.serviceWorker.register('./sw.js');
+  // Offline support is an enhancement, and an enhancement is never allowed to
+  // decide whether the app starts. `'serviceWorker' in navigator` is not the
+  // question: the property exists in Firefox's private windows and register()
+  // rejects there, as it does when storage is denied and under some managed
+  // policies. Awaiting it unguarded turned every one of those into a dead app
+  // showing "Startup failed", when moving a file across a camera needs no
+  // worker at all. A refusal costs the precache, the chip says "online only",
+  // and everything else works.
+  const reg = 'serviceWorker' in navigator
+    ? await navigator.serviceWorker.register('./sw.js').catch((e) => {
+        console.warn('rabaska: no service worker:', e.message);
+        return null;
+      })
+    : null;
+  if (reg) {
 
     // A parked build, offered and never taken automatically. See sw.js.
     const offer = () => { $('update-panel').hidden = false; };

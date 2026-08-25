@@ -84,7 +84,13 @@ echo "==> build hash: $BUILD"
 # drift from what is actually in dist/. A stale entry makes cache.addAll reject,
 # which fails the whole install and leaves the app with no offline capability at
 # all, silently.
-PRECACHE=$(cd "$OUT" && ls | grep -v '^_headers$' | sed "s|^|    './|;s|$|',|" | sort)
+# Versioned exactly as the page requests them, or the worker caches one URL and
+# the page asks for another: cache-first then misses every time, and the app
+# stops working offline while looking like it still does.
+PRECACHE=$(cd "$OUT" && ls | grep -v '^_headers$' | sed "s|^|    './|;s|$|',|" \
+  | sed "s|'./app.js',|'./app.js?v=$BUILD',|;\
+         s|'./rabaska_core.js',|'./rabaska_core.js?v=$BUILD',|;\
+         s|'./wasm-inline.js',|'./wasm-inline.js?v=$BUILD',|" | sort)
 python3 - "$OUT/sw.js" "$BUILD" <<PY
 import sys
 tpl = open('app/sw.js').read()
@@ -97,6 +103,35 @@ open(sys.argv[1], 'w').write(tpl)
 PY
 
 sed -i.bak "s|__BUILD_HASH__|$BUILD|g" "$OUT/app.js" && rm -f "$OUT/app.js.bak"
+
+# Every executable URL carries the build, and index.html is what anchors it.
+#
+# The three JS files are separate HTTP cache entries with a four-hour max-age,
+# and a browser will assemble the app out of whichever copies it happens to
+# hold. When one is evicted and refetched while another is not, the result is a
+# shell talking to a wasm module it was not compiled against, which throws
+# inside generated code at startup. Detecting that afterwards is not enough:
+# location.reload() refetches the document and nothing else — measured, one
+# request — so a reload cannot replace a stale script, and connect-src 'none'
+# rules out fetching one deliberately.
+#
+# index.html is served must-revalidate, so it is the one file always taken from
+# the origin. Naming the build in the URLs it points at makes the whole set
+# follow it: a browser holding app.js?v=OLD is not holding app.js?v=NEW, so it
+# has to go and get it, and that file in turn asks for its own build's glue.
+# Either everything comes from one build or the fetch goes to the network. A
+# stale copy can still be used, but only as part of a consistent stale set,
+# which runs correctly and is what the update banner is for.
+for f in app.js rabaska_core.js wasm-inline.js; do
+  sed -i.bak "s|'\./$f'|'./$f?v=$BUILD'|g" "$OUT/index.html" "$OUT/app.js"
+  sed -i.bak "s|"\./$f"|"./$f?v=$BUILD"|g" "$OUT/index.html"
+done
+rm -f "$OUT"/*.bak
+
+grep -q "app.js?v=$BUILD" "$OUT/index.html" \
+  || { echo "FAIL: index.html does not point at this build's app.js"; exit 1; }
+grep -q "rabaska_core.js?v=$BUILD" "$OUT/app.js" \
+  || { echo "FAIL: app.js does not import this build's glue"; exit 1; }
 
 # Every executable piece says which build it belongs to, so the shell can refuse
 # to run against a wasm module it was not compiled against. They are three
@@ -176,9 +211,24 @@ import os, re, sys
 d = sys.argv[1]
 sw = open(os.path.join(d, 'sw.js')).read()
 listed = re.findall(r"'\./([^']*)'", sw[sw.index('const PRECACHE'):sw.index('];')])
-missing = [f for f in listed if f and not os.path.exists(os.path.join(d, f))]
+# The executable URLs carry ?v=<build> so a browser cannot serve one build's
+# script to another build's shell. The query is a cache key, not a path, so it
+# is stripped before asking whether the file is there.
+missing = [f for f in listed if f and not os.path.exists(os.path.join(d, f.split('?')[0]))]
 if missing:
     sys.exit('FAIL: sw precaches files not in dist: ' + ', '.join(missing))
+
+# The precache must hold the URLs the page actually requests. A worker that
+# caches './app.js' while the page asks for './app.js?v=abc' misses on every
+# load: cache-first quietly becomes network-first, and the app stops working
+# offline while still reporting that it does.
+html = open(os.path.join(d, 'index.html')).read()
+app = open(os.path.join(d, 'app.js')).read()
+wanted = set(re.findall(r'\./((?:app|rabaska_core|wasm-inline)\.js\?v=[0-9a-f]+)', html + app))
+for url in sorted(wanted):
+    if url not in listed:
+        sys.exit(f'FAIL: the page requests ./{url} but the worker does not cache it')
+print(f'    versioned URLs precached: {len(wanted)} of them')
 print('    precache manifest matches dist (%d entries)' % len(listed))
 PY
 
