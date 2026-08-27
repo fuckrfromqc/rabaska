@@ -42,9 +42,38 @@ const LADDER = [
 ];
 
 const SCHEDULE = LADDER.flatMap((r) => Array(r.weight).fill(r));
-const DISPLAY_FPS = 12;      // displayed frames per second
 const BEACON_ECC = 3;        // ECC-H: acquire from across the room
 const STALL_MS = 3000;
+
+// How fast the sending screen advances, and why it is a setting.
+//
+// It shipped as a constant 12, which is faster than a receiver can consume.
+// Measured on a desktop, one 1080p frame costs about 105ms end to end —
+// getImageData 20, the luma pass 15, the decode 70 — so the receiving phone
+// manages around nine frames a second at best, and a phone is slower than the
+// machine that number came from. A screen advancing every 83ms is therefore
+// showing frames nobody looks at, and every camera exposure that straddles a
+// change captures half of one code and half of the next, which decodes as
+// nothing at all.
+//
+// The fountain layer hides this as slowness rather than failure: nothing is
+// lost, it just takes several passes to collect enough symbols, which is
+// exactly what "we have to go through multiple loops" is.
+//
+// There is no feedback channel, by design, so the sender cannot discover the
+// right rate and it cannot be negotiated. It depends on both devices and the
+// light, which makes it a decision for the person holding them.
+const PACE = { steady: 6, brisk: 9, fast: 12 };
+const PACE_NOTE = {
+  steady: 'Steady: 6 frames a second. Slower is often faster overall — a frame '
+    + 'the other camera misses is worth nothing.',
+  brisk: 'Brisk: 9 frames a second. Good light, and a recent phone reading it.',
+  fast: 'Fast: 12 frames a second. Only worth trying with bright screens, '
+    + 'steady hands and the newest phones.',
+};
+const PACE_PREF = 'rabaska:pace';
+let pace = 'steady';
+const displayFps = () => PACE[pace];
 
 // ---------------------------------------------------------------------------
 // storage
@@ -219,6 +248,22 @@ async function openCamera(constraints) {
   // Fade in when the element actually has a frame, not when play() resolves:
   // play() returns before there is anything to show, and fading up an empty
   // rectangle reads as a glitch rather than as a camera starting.
+  // What the camera actually handed back, which is not what was asked for.
+  // 1920x1080 is `ideal`, so a device is free to answer with less, and the
+  // difference decides what can be read at all: at 70% of the frame the
+  // densest rung of the ladder — half of every six frames — needs about
+  // 4 pixels per module and gets 4.1 at 1080p, 2.7 at 720p, where it never
+  // decodes. Silently harvesting a third of the frames looks exactly like a
+  // slow transfer, so the number is on screen.
+  const t = stream.getVideoTracks()[0]?.getSettings?.();
+  if (t?.width && t?.height) {
+    $('cam-res').textContent = `${t.width}×${t.height}`;
+    if (t.height < 1080) {
+      $('cam-res').title = 'Below 1080p: hold the devices closer so the code '
+        + 'fills the frame, or the densest frames will not decode.';
+    }
+  }
+
   const live = () => $('sight').classList.add('live');
   if (video.readyState >= 2) live();
   else video.addEventListener('loadeddata', live, { once: true });
@@ -316,6 +361,21 @@ function saveCameraPref(on) {
   } catch {
     // Not worth surfacing. The switch still holds for this session.
   }
+}
+
+function loadPacePref() {
+  try {
+    const v = localStorage.getItem(PACE_PREF);
+    return v in PACE ? v : 'steady';
+  } catch {
+    return 'steady';
+  }
+}
+
+function savePacePref(v) {
+  try {
+    localStorage.setItem(PACE_PREF, v);
+  } catch { /* holds for this session */ }
 }
 
 // ---------------------------------------------------------------------------
@@ -682,7 +742,7 @@ async function beSender(payload, pairReqBytes) {
   // Time estimate BEFORE the transfer, so nobody commits to three minutes of
   // holding a phone steady without knowing.
   const perFrame = cap - 19;
-  const est = (send.wire_bytes / perFrame) / DISPLAY_FPS / 0.7;
+  const est = (send.wire_bytes / perFrame) / displayFps() / 0.7;
   $('hint').textContent = send.wire_bytes < 4096
     ? 'About a second. Hold steady.'
     : `About ${Math.ceil(est)}s. ${send.compressed ? 'Compressed. ' : ''}Hold steady.`;
@@ -693,6 +753,7 @@ async function beSender(payload, pairReqBytes) {
   let i = 0;
   const tick = () => {
     if (state.stop) return;
+    const started = performance.now();
     const rung = SCHEDULE[i % SCHEDULE.length];
     const f = send.next_frame(qr_capacity(rung.version, rung.ecc));
     // Beacons always go out on the robust rung regardless of the active
@@ -700,7 +761,16 @@ async function beSender(payload, pairReqBytes) {
     const ecc = f.robust ? BEACON_ECC : rung.ecc;
     paint($('display'), render_qr(f.bytes, ecc, 5));
     i++;
-    setTimeout(tick, 1000 / DISPLAY_FPS);
+
+    // Sleep for what is LEFT of the period, not for the whole of it. Building
+    // and painting a frame is not free — about 45ms on the machine this was
+    // measured on, more on a phone — and waiting a full period afterwards adds
+    // that to every interval. A nominal 12 came out as 7.5 frames a second,
+    // which made the setting a suggestion and the time estimate wrong by the
+    // same factor. Read the pace every tick too, so a change lands immediately:
+    // the moment a person wants it is while they are watching it not work.
+    const left = 1000 / displayFps() - (performance.now() - started);
+    setTimeout(tick, Math.max(0, left));
   };
   // The display loop starts FIRST and unconditionally. While the transmitter
   // is held it emits only beacons, and the receiver needs to see one before it
@@ -985,6 +1055,18 @@ async function main() {
     clearStaged();
     $('hint').textContent = 'Cancelled.';
   };
+
+  pace = loadPacePref();
+  for (const r of document.querySelectorAll('input[name="pace"]')) {
+    r.checked = r.value === pace;
+    r.onchange = () => {
+      if (!r.checked) return;
+      pace = r.value;
+      savePacePref(pace);
+      $('pace-note').textContent = PACE_NOTE[pace];
+    };
+  }
+  $('pace-note').textContent = PACE_NOTE[pace];
 
   // Read before beReceiver, so a camera left off in an earlier visit never
   // opens at all rather than opening and being shut a moment later.

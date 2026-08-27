@@ -59,6 +59,21 @@
       <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
       <span class="switch-text">Use camera</span>
     </label>
+
+    <!-- How fast the sending screen advances through frames. It is a setting
+         rather than a constant because the right value is a property of the
+         two devices and the room, and there is no feedback channel to discover
+         it: the sender cannot be told that the receiver is falling behind.
+         Displaying faster than the other phone can decode is not a smaller
+         gain, it is frames that are never looked at. -->
+    <fieldset class="pace">
+      <legend>Frame pace</legend>
+      <label><input type="radio" name="pace" value="steady" checked><span>Steady</span></label>
+      <label><input type="radio" name="pace" value="brisk"><span>Brisk</span></label>
+      <label><input type="radio" name="pace" value="fast"><span>Fast</span></label>
+    </fieldset>
+    <p class="note" id="pace-note">Steady: 6 frames a second. Slower is often
+      faster overall — a frame the other camera misses is worth nothing.</p>
   </div>
 
   <p id="hint">Starting…</p>
@@ -116,6 +131,7 @@
     <span>this build <b id="own-build">…</b></span>
     <span>peer <b id="peer-build">—</b></span>
     <span>symbol <b id="symbol-size">—</b></span>
+    <span>camera <b id="cam-res">—</b></span>
     <span>protocol <b>v2</b></span>
   </footer>
 </main>
