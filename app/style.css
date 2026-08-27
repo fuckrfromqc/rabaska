@@ -355,6 +355,55 @@ main { max-width: 30rem; margin: 0 auto; padding: 22px 0 56px; }
 }
 .switch input:checked ~ .switch-text { color: var(--ink); }
 
+/* Frame pace. A segmented control in the same tokens as the switch: hairline
+   on paper, the one blue for the chosen segment. Real radios, visually hidden
+   rather than display:none, so the group keeps its keyboard behaviour and its
+   accessible name. */
+.pace {
+  display: flex;
+  justify-content: center;
+  gap: 0;
+  margin: 2px auto 0;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  width: max-content;
+  overflow: hidden;
+}
+.pace legend {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.pace label {
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.pace input {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.pace span {
+  display: block;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  color: var(--muted);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+.pace label + label span { border-left: 1px solid var(--line); }
+.pace input:checked + span { background: var(--blue); color: var(--white); }
+.pace input:focus-visible + span { outline: 2px solid var(--blue); outline-offset: -2px; }
+#pace-note { margin: 6px auto 0; max-width: 34ch; }
+
 #hint { min-height: 2.7em; color: var(--muted); font-size: 13.5px; margin: 12px 0 6px; }
 #hint.danger { color: var(--err); }
 
